@@ -1047,6 +1047,7 @@
     function build() {
       const targets = measureLayout();
       headline.style.visibility = "hidden";
+      stage.style.visibility = "hidden";
 
       const vw = window.innerWidth;
       const vh = window.innerHeight;
@@ -1094,6 +1095,8 @@
         .forEach((t) => {
           const randX = boundsLeft + Math.random() * maxW;
           const randY = boundsTop + Math.random() * boundsH;
+          const randRotation = (Math.random() - 0.5) * 300;
+          const randScale = 0.5 + Math.random() * 0.6;
 
           const span = document.createElement("span");
           span.className = "scatter-letter";
@@ -1101,6 +1104,10 @@
 
           span.dataset.cx = t.cx;
           span.dataset.cy = t.cy;
+          span.dataset.scatterTargetX = randX;
+          span.dataset.scatterTargetY = randY;
+          span.dataset.scatterTargetRotation = randRotation;
+          span.dataset.scatterTargetScale = randScale;
 
           span.style.font = typo.font;
           span.style.color = typo.color;
@@ -1114,24 +1121,56 @@
             top: 0,
             xPercent: -50,
             yPercent: -50,
-            x: randX,
-            y: randY,
-            rotation: (Math.random() - 0.5) * 300,
-            scale: 0.5 + Math.random() * 0.6,
             autoAlpha: 0,
             force3D: true,
+            transformOrigin: "50% 50%",
+            willChange: "transform, opacity",
+            backfaceVisibility: "hidden",
           });
 
           stage.appendChild(span);
           letters.push(span);
         });
 
-      runLoader();
+      primeLoader();
+    }
+
+    function primeLoader() {
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+
+      letters.forEach((el) => {
+        const angle = Math.random() * Math.PI * 2;
+        const dist = Math.max(vw, vh) * 1.3;
+        const fromX = Math.cos(angle) * dist;
+        const fromY = Math.sin(angle) * dist;
+        const fromR = (Math.random() - 0.5) * 720;
+        const fromS = 0.2 + Math.random() * 0.4;
+        const delay = Math.random() * 0.5;
+        const dur = 0.7 + Math.random() * 0.5;
+
+        el.dataset.scatterDelay = delay;
+        el.dataset.scatterDuration = dur;
+
+        gsap.set(el, {
+          x: fromX,
+          y: fromY,
+          rotation: fromR,
+          scale: fromS,
+          autoAlpha: 0,
+          force3D: true,
+        });
+      });
+
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          stage.style.visibility = "";
+          runLoader();
+        });
+      });
     }
 
     function runLoader() {
-      const vw = window.innerWidth;
-      const vh = window.innerHeight;
       let maxEnd = 0;
 
       const patternPaths = document.querySelectorAll(".sticky_pattern path");
@@ -1156,35 +1195,27 @@
       }
 
       letters.forEach((el) => {
-        const toX = gsap.getProperty(el, "x");
-        const toY = gsap.getProperty(el, "y");
-        const toR = gsap.getProperty(el, "rotation");
-        const toS = gsap.getProperty(el, "scale");
+        const toX = parseFloat(el.dataset.scatterTargetX || "0");
+        const toY = parseFloat(el.dataset.scatterTargetY || "0");
+        const toR = parseFloat(el.dataset.scatterTargetRotation || "0");
+        const toS = parseFloat(el.dataset.scatterTargetScale || "1");
+        const delay = parseFloat(el.dataset.scatterDelay || "0");
+        const dur = parseFloat(el.dataset.scatterDuration || "0.7");
 
-        const angle = Math.random() * Math.PI * 2;
-        const dist = Math.max(vw, vh) * 1.3;
-        const fromX = Math.cos(angle) * dist;
-        const fromY = Math.sin(angle) * dist;
-        const fromR = (Math.random() - 0.5) * 720;
-        const fromS = 0.2 + Math.random() * 0.4;
-        const delay = Math.random() * 0.5;
-        const dur = 0.7 + Math.random() * 0.5;
-
-        gsap.fromTo(
-          el,
-          { autoAlpha: 0, x: fromX, y: fromY, rotation: fromR, scale: fromS },
-          {
-            autoAlpha: 1,
-            x: toX,
-            y: toY,
-            rotation: toR,
-            scale: toS,
-            duration: dur,
-            ease: "power3.out",
-            delay,
-            force3D: true,
+        gsap.to(el, {
+          autoAlpha: 1,
+          x: toX,
+          y: toY,
+          rotation: toR,
+          scale: toS,
+          duration: dur,
+          ease: "power3.out",
+          delay,
+          force3D: true,
+          onComplete: () => {
+            el.style.willChange = "";
           },
-        );
+        });
 
         maxEnd = Math.max(maxEnd, delay + dur);
       });
