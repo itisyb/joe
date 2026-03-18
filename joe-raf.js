@@ -864,7 +864,13 @@
       sectionAbove.style.isolation = "isolate";
     }
 
-    container.style.zIndex = "1";
+    // The section below should scroll over the pinned container,
+    // so give it a higher z-index
+    var sectionBelow = root.nextElementSibling;
+    if (sectionBelow) {
+      sectionBelow.style.position = "relative";
+      sectionBelow.style.zIndex = "3";
+    }
 
     ScrollTrigger.create({
       trigger: pinHeight,
@@ -873,17 +879,15 @@
       pin: container,
       pinType: "fixed",
       invalidateOnRefresh: true,
-      onEnter: function () {
-        container.style.clipPath = "inset(0 0 0 0)";
+      onLeaveBack: function () {
+        // Hide when scrolling back above the section
+        container.style.visibility = "hidden";
       },
-      onLeave: function () {
-        container.style.clipPath = "inset(0 0 100% 0)";
+      onEnter: function () {
+        container.style.visibility = "visible";
       },
       onEnterBack: function () {
-        container.style.clipPath = "inset(0 0 0 0)";
-      },
-      onLeaveBack: function () {
-        container.style.clipPath = "inset(100% 0 0 0)";
+        container.style.visibility = "visible";
       },
     });
 
