@@ -51,27 +51,6 @@
     return document.querySelector(".nav") || document.querySelector(".nav_wrap");
   }
 
-  function isCoarsePointerDevice() {
-    return window.matchMedia("(hover: none) and (pointer: coarse)").matches;
-  }
-
-  function getViewportHeight() {
-    if (window.visualViewport && window.visualViewport.height) {
-      return Math.round(window.visualViewport.height);
-    }
-    return window.innerHeight || document.documentElement.clientHeight || 0;
-  }
-
-  function configureScrollTrigger() {
-    if (typeof ScrollTrigger === "undefined") return;
-
-    if (isCoarsePointerDevice()) {
-      ScrollTrigger.config({
-        ignoreMobileResize: true,
-      });
-    }
-  }
-
   // =========================================================
   // 02) SMOOTH SCROLL (LENIS)
   // =========================================================
@@ -81,8 +60,6 @@
   let __lenisAnchorBound = false;
 
   function initLenis() {
-    if (isCoarsePointerDevice()) return;
-
     if (typeof Lenis === "undefined") {
       console.warn(
         "[Lenis] Lenis nicht gefunden. Bitte Lenis vor diesem Script laden.",
@@ -586,9 +563,12 @@
     });
 
     if (document.fonts && document.fonts.ready) {
-      document.fonts.ready.then(() => ScrollTrigger.refresh());
+      document.fonts.ready.then(() => {
+        // Delay refresh so the scatter loader can finish first
+        setTimeout(() => ScrollTrigger.refresh(), 2000);
+      });
     } else {
-      setTimeout(() => ScrollTrigger.refresh(), 0);
+      setTimeout(() => ScrollTrigger.refresh(), 2000);
     }
   }
 
@@ -867,20 +847,12 @@
 
   // Challenges mobile pin stack (is-mobile)
   function initChallengesMobileStack() {
-    if (typeof gsap === "undefined" || typeof ScrollTrigger === "undefined")
-      return;
-
     const root = document.querySelector(".challenges_wrap.is-mobile");
-    if (!root || root.dataset.mobileStackInitialized === "true") return;
+    if (!root) return;
 
     const pinHeight = root.querySelector(".pin-height");
     const container = root.querySelector(".container");
     if (!pinHeight || !container) return;
-
-    const medias = Array.from(root.querySelectorAll(".media"));
-    if (!medias.length) return;
-
-    root.dataset.mobileStackInitialized = "true";
 
     // Safari iOS: Section darüber bleibt über dem Pin-Stack (kein Überfahren/Überblenden)
     root.style.position = "relative";
@@ -892,84 +864,66 @@
       sectionAbove.style.isolation = "isolate";
     }
 
-    const gap = 30;
-    const stackOffset = gap * Math.max(medias.length - 1, 0);
-    const rotations = medias.map((_, index) => {
-      if (index === 0) return 0;
-      const direction = index % 2 === 0 ? -1 : 1;
-      return direction * (12 + index * 4);
-    });
+    container.style.zIndex = "1";
 
-    function getPinDistance() {
-      const viewportHeight = getViewportHeight();
-      const naturalDistance = pinHeight.scrollHeight - viewportHeight;
-      const minimumDistance = viewportHeight * Math.max(medias.length - 0.25, 1);
-      return Math.max(naturalDistance, minimumDistance, 1);
-    }
-
-    function applyInitialState() {
-      medias.forEach((media, index) => {
-        gsap.set(media, {
-          y: stackOffset,
-          z: -stackOffset,
-          yPercent: 0,
-          scale: 1,
-          rotation: 0,
-          zIndex: medias.length - index,
-          force3D: true,
-          willChange: "transform",
-        });
-      });
-    }
-
-    applyInitialState();
-
-    const master = gsap.timeline({
-      defaults: { ease: "none" },
-      scrollTrigger: {
-        trigger: pinHeight,
-        start: "top top",
-        end: () => "+=" + getPinDistance(),
-        pin: container,
-        scrub: 0.35,
-        anticipatePin: 1,
-        invalidateOnRefresh: true,
-        refreshPriority: 2,
-        onRefreshInit: applyInitialState,
+    ScrollTrigger.create({
+      trigger: pinHeight,
+      start: "top top",
+      end: "bottom bottom",
+      pin: container,
+      pinType: "fixed",
+      invalidateOnRefresh: true,
+      onEnter: function () {
+        container.style.clipPath = "inset(0 0 0 0)";
+      },
+      onLeave: function () {
+        container.style.clipPath = "inset(0 0 100% 0)";
+      },
+      onEnterBack: function () {
+        container.style.clipPath = "inset(0 0 0 0)";
+      },
+      onLeaveBack: function () {
+        container.style.clipPath = "inset(100% 0 0 0)";
       },
     });
 
-    const settleDuration = 0.75;
-    const holdDuration = 0.2;
-    const exitDuration = 0.6;
-    const stepDuration = 0.72;
+    const gap = 30;
+    const medias = root.querySelectorAll(".media");
+    const distPerMedia =
+      (pinHeight.clientHeight - window.innerHeight) / medias.length;
+
+    gsap.set(medias, {
+      y: gap * (medias.length - 1),
+      z: -gap * (medias.length - 1),
+    });
 
     medias.forEach((media, index) => {
-      const startAt = index * stepDuration;
-
-      master.to(
-        media,
-        {
-          y: 0,
-          z: 0,
-          duration: settleDuration,
+      const tl = gsap.timeline({
+        scrollTrigger: {
+          trigger: pinHeight,
+          start: "top top+=" + distPerMedia * index,
+          end: "bottom bottom+=" + distPerMedia * index,
+          scrub: 0.5,
         },
-        startAt,
-      );
+      });
 
-      // First card stays on screen — only cards above it leave the stack
+      for (let i = 0; i < medias.length - 1; i++) {
+        tl.to(media, {
+          y: "-=" + gap,
+          z: "+=" + gap,
+          ease: "back.inOut(3)",
+        });
+      }
+
+      // First card stays on screen — only fly away cards stacked on top of it
       if (index > 0) {
-        master.to(
-          media,
-          {
-            yPercent: -80,
-            y: () => -getViewportHeight() * 0.5,
-            scale: 1.18,
-            rotation: rotations[index],
-            duration: exitDuration,
-          },
-          startAt + settleDuration + holdDuration,
-        );
+        tl.to(media, {
+          yPercent: -80,
+          y: "-50vh",
+          scale: 1.2,
+          rotation: (Math.random() - 0.5) * 50,
+          ease: "power4.in",
+        });
       }
     });
   }
@@ -1065,9 +1019,14 @@
       window.addEventListener("load", startScatterLoader, { once: true });
     }
 
+    var lastResizeWidth = window.innerWidth;
     window.addEventListener(
       "resize",
       debounce(() => {
+        var newWidth = window.innerWidth;
+        // Skip rebuild if only height changed (iOS Safari address bar hide/show)
+        if (newWidth === lastResizeWidth) return;
+        lastResizeWidth = newWidth;
         scatterInstances.forEach((i) => i.rebuild());
       }, 300),
     );
@@ -1078,6 +1037,21 @@
     if (!sticky) return { rebuild() {} };
     const stage = sticky.querySelector(".scatter-stage");
     if (!stage) return { rebuild() {} };
+
+    // Prevent hero from overlapping sections below during fast scroll
+    const heroScroll = headline.closest(".hero-scroll") || sticky.parentElement;
+    if (heroScroll) {
+      heroScroll.style.position = "relative";
+      heroScroll.style.zIndex = "1";
+      heroScroll.style.isolation = "isolate";
+    }
+    const sectionBelow = heroScroll
+      ? heroScroll.nextElementSibling
+      : sticky.parentElement && sticky.parentElement.nextElementSibling;
+    if (sectionBelow) {
+      sectionBelow.style.position = "relative";
+      sectionBelow.style.zIndex = "2";
+    }
     let letters = [];
     let scatterScrollTrigger = null;
     let indicatorScrollTrigger = null;
@@ -1188,7 +1162,6 @@
             autoAlpha: 0,
             force3D: true,
             transformOrigin: "50% 50%",
-            willChange: "transform, opacity",
             backfaceVisibility: "hidden",
           });
 
@@ -1216,6 +1189,7 @@
         el.dataset.scatterDelay = delay;
         el.dataset.scatterDuration = dur;
 
+        el.style.willChange = "transform, opacity";
         gsap.set(el, {
           x: fromX,
           y: fromY,
@@ -1322,12 +1296,16 @@
         headline.closest("[data-scatter-scroll]") ||
         headline.closest(".hero-scroll");
 
+      // Lock end value to absolute pixels so iOS address bar
+      // height changes don't recalculate the scroll range
+      var scrollEndPx = window.innerHeight * 3;
+
       const tl = gsap.timeline({
         scrollTrigger: {
           trigger: scrollEl,
           start: "top top",
-          end: "+=300%",
-          scrub: 0.5,
+          end: "+=" + scrollEndPx + "px",
+          scrub: true,
           onToggle: (self) => {
             scatterScrollTrigger = self;
           },
@@ -1335,8 +1313,14 @@
       });
 
       letters.forEach((el, i) => {
-        tl.to(
+        tl.fromTo(
           el,
+          {
+            x: parseFloat(el.dataset.scatterTargetX || "0"),
+            y: parseFloat(el.dataset.scatterTargetY || "0"),
+            rotation: parseFloat(el.dataset.scatterTargetRotation || "0"),
+            scale: parseFloat(el.dataset.scatterTargetScale || "1"),
+          },
           {
             x: parseFloat(el.dataset.cx),
             y: parseFloat(el.dataset.cy),
@@ -1344,7 +1328,7 @@
             scale: 1,
             ease: "power3.out",
             duration: 0.55,
-            force3D: true,
+            immediateRender: false,
           },
           (i / letters.length) * 0.55,
         );
@@ -2125,7 +2109,6 @@
     }
     if (__animFinalInitialized) return;
     __animFinalInitialized = true;
-    configureScrollTrigger();
     initLenis();
     initNavWrap();
     initContentRevealScroll();
