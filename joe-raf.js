@@ -854,23 +854,12 @@
     const container = root.querySelector(".container");
     if (!pinHeight || !container) return;
 
-    // Safari iOS: Section darüber bleibt über dem Pin-Stack (kein Überfahren/Überblenden)
-    root.style.position = "relative";
-    root.style.zIndex = "1";
-    const sectionAbove = root.previousElementSibling;
-    if (sectionAbove) {
-      sectionAbove.style.position = "relative";
-      sectionAbove.style.zIndex = "2";
-      sectionAbove.style.isolation = "isolate";
-    }
-
-    // The section below should scroll over the pinned container,
-    // so give it a higher z-index
-    var sectionBelow = root.nextElementSibling;
-    if (sectionBelow) {
-      sectionBelow.style.position = "relative";
-      sectionBelow.style.zIndex = "3";
-    }
+    // pinType "fixed" for smooth Safari perf.
+    // The fixed container escapes document flow, so we use the
+    // .pin-height wrapper with overflow:hidden as a clip boundary
+    // via a scroll-synced clipPath that masks only the top/bottom edges
+    // where adjacent sections should cover the cards.
+    container.style.visibility = "hidden";
 
     ScrollTrigger.create({
       trigger: pinHeight,
@@ -879,9 +868,31 @@
       pin: container,
       pinType: "fixed",
       invalidateOnRefresh: true,
-      onLeaveBack: function () {
-        // Hide when scrolling back above the section
+      onUpdate: function (self) {
+        if (!self.isActive) return;
+        container.style.visibility = "visible";
+        var rect = pinHeight.getBoundingClientRect();
+        var vh = window.innerHeight;
+        // Top edge: how far below the viewport top the pin-height starts
+        // (positive when section hasn't fully scrolled to top yet)
+        var topGap = Math.max(0, rect.top);
+        // Bottom edge: how far above viewport bottom the pin-height ends
+        // (positive when section bottom has scrolled above viewport bottom)
+        var bottomGap = Math.max(0, vh - rect.bottom);
+        if (topGap > 0 || bottomGap > 0) {
+          container.style.clipPath =
+            "inset(" + topGap + "px 0px " + bottomGap + "px 0px)";
+        } else {
+          container.style.clipPath = "none";
+        }
+      },
+      onLeave: function () {
         container.style.visibility = "hidden";
+        container.style.clipPath = "none";
+      },
+      onLeaveBack: function () {
+        container.style.visibility = "hidden";
+        container.style.clipPath = "none";
       },
       onEnter: function () {
         container.style.visibility = "visible";
