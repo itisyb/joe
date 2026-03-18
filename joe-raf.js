@@ -855,11 +855,17 @@
     if (!pinHeight || !container) return;
 
     // pinType "fixed" for smooth Safari perf.
-    // The fixed container escapes document flow, so we use the
-    // .pin-height wrapper with overflow:hidden as a clip boundary
-    // via a scroll-synced clipPath that masks only the top/bottom edges
-    // where adjacent sections should cover the cards.
-    container.style.visibility = "hidden";
+    // The fixed container escapes normal stacking, so we clip it
+    // to the .pin-height bounds on every scroll frame. The container
+    // is always visible — it never hides. The top edge is clipped
+    // so the section above covers it; the bottom is never clipped
+    // so the first card stays visible after the section, and the
+    // next section scrolls over it via z-index.
+    var sectionBelow = root.nextElementSibling;
+    if (sectionBelow) {
+      sectionBelow.style.position = "relative";
+      sectionBelow.style.zIndex = "10";
+    }
 
     ScrollTrigger.create({
       trigger: pinHeight,
@@ -868,37 +874,14 @@
       pin: container,
       pinType: "fixed",
       invalidateOnRefresh: true,
-      onUpdate: function (self) {
-        if (!self.isActive) return;
-        container.style.visibility = "visible";
+      onUpdate: function () {
         var rect = pinHeight.getBoundingClientRect();
-        var vh = window.innerHeight;
-        // Top edge: how far below the viewport top the pin-height starts
-        // (positive when section hasn't fully scrolled to top yet)
         var topGap = Math.max(0, rect.top);
-        // Bottom edge: how far above viewport bottom the pin-height ends
-        // (positive when section bottom has scrolled above viewport bottom)
-        var bottomGap = Math.max(0, vh - rect.bottom);
-        if (topGap > 0 || bottomGap > 0) {
-          container.style.clipPath =
-            "inset(" + topGap + "px 0px " + bottomGap + "px 0px)";
+        if (topGap > 0) {
+          container.style.clipPath = "inset(" + topGap + "px 0px 0px 0px)";
         } else {
           container.style.clipPath = "none";
         }
-      },
-      onLeave: function () {
-        container.style.visibility = "hidden";
-        container.style.clipPath = "none";
-      },
-      onLeaveBack: function () {
-        container.style.visibility = "hidden";
-        container.style.clipPath = "none";
-      },
-      onEnter: function () {
-        container.style.visibility = "visible";
-      },
-      onEnterBack: function () {
-        container.style.visibility = "visible";
       },
     });
 
