@@ -7,6 +7,16 @@ if (typeof ScrollTrigger !== "undefined") gsap.registerPlugin(ScrollTrigger);
 if (typeof SplitText !== "undefined") gsap.registerPlugin(SplitText);
 if (typeof ScrambleTextPlugin !== "undefined") gsap.registerPlugin(ScrambleTextPlugin);
 if (typeof Draggable !== "undefined") gsap.registerPlugin(Draggable);
+function ensureFlipPluginRegistered() {
+  var F = typeof window !== "undefined" ? window.Flip : undefined;
+  if (typeof F === "undefined" || typeof gsap === "undefined") return false;
+  try {
+    gsap.registerPlugin(F);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
 
 history.scrollRestoration = "manual";
 
@@ -60,6 +70,10 @@ function initOnceFunctions() {
   if (document.querySelector("[data-flick-cards-init]")) initFlickCards(document);
   if (document.querySelector(".faq_cms_wrap")) initFaqAccordion(document);
   if (document.querySelector("[data-marquee-scroll-direction-target]")) initMarqueeScrollDirection(document);
+  initWorkViewToggle();
+  initFolioFlipViewToggle();
+  if (document.querySelector("[data-media-init]")) initMediaSetup();
+  initCustomCursor();
 }
 
 function initBeforeEnterFunctions(next) {
@@ -104,6 +118,11 @@ function initAfterEnterFunctions(next) {
   if (has("[data-flick-cards-init]")) initFlickCards(nextPage);
   if (has(".faq_cms_wrap")) initFaqAccordion(nextPage);
   if (has("[data-marquee-scroll-direction-target]")) initMarqueeScrollDirection(nextPage);
+  if (has("[data-media-init]")) initMediaSetup();
+  initCustomCursor();
+  if (has("[data-view-default]") || has(".folio_cms_list")) {
+    syncFolioFlipViewInitialState();
+  }
   if(hasLenis){
     lenis.resize();
   }
@@ -129,10 +148,16 @@ function runPageOnceAnimation(next) {
 
 function runPageLeaveAnimation(current, next) {
   const transitionWrap = document.querySelector("[data-transition-wrap]");
+    if (!transitionWrap) {
+        // No transition overlay found — just remove current instantly
+        const tl = gsap.timeline();
+        tl.set(current, { autoAlpha: 0, onComplete: () => current.remove() });
+        return tl;
+    }
+  
   const transitionPanel = transitionWrap.querySelector("[data-transition-panel]");
   const transitionLabel = transitionWrap.querySelector("[data-transition-label]");
-  const transitionLabelText = transitionWrap.querySelector("[data-transition-label-text]");
-
+    
   const nextPageName = next.getAttribute("data-page-name")
   transitionLabelText.innerText = nextPageName || "Hi there";
 
@@ -300,6 +325,389 @@ barba.init({
 
 
 // -----------------------------------------
+// MEDIA SETUP (autoplay, click, hover)
+// -----------------------------------------
+
+function initMediaSetup() {
+  const mediaElements = document.querySelectorAll("[data-media-init]");
+  if (!mediaElements.length) return;
+
+  const pauseDelay = 200;
+  const viewportOffset = 0.1;
+  const isHoverDevice = window.matchMedia("(hover: hover) and (pointer: fine)").matches;
+
+  initMediaSetup._cleanup?.forEach(fn => fn());
+  const cleanupFns = [];
+  const rootMarginValue = viewportOffset * 100;
+
+  mediaElements.forEach(mediaEl => {
+    const video = mediaEl.querySelector("[data-media-video-src]");
+    if (!video) return;
+
+    const mode = mediaEl.dataset.mediaMode || "autoplay";
+    const touchMode = mediaEl.dataset.mediaTouchMode;
+    const resetAttr = mediaEl.dataset.mediaReset;
+    const toggleElements = [...mediaEl.querySelectorAll("[data-media-toggle]")];
+
+    const activeMode = !isHoverDevice ? (touchMode || (mode === "hover" ? "autoplay" : mode)) : mode;
+    const shouldResetOnPause = resetAttr === "true" ? true : resetAttr === "false" ? false : activeMode === "hover";
+
+    const clickTargets = toggleElements.length ? toggleElements : [mediaEl];
+    const shouldUseClickToggle = activeMode === "click" || (activeMode === "autoplay" && toggleElements.length);
+
+    let isInView = false;
+    let isHovering = false;
+    let hasLoaded = false;
+    let userPaused = false;
+    let userActivated = false;
+    let isActivated = false;
+    let shouldBePlaying = false;
+    let pauseTimer = null;
+
+    const setStatus = status => {
+      mediaEl.dataset.mediaStatus = status;
+    };
+
+    const clearPauseTimer = () => {
+      clearTimeout(pauseTimer);
+    };
+
+    const addCleanup = fn => {
+      cleanupFns.push(fn);
+    };
+
+    const on = (target, event, handler) => {
+      target.addEventListener(event, handler);
+      addCleanup(() => target.removeEventListener(event, handler));
+    };
+
+    const playAttempt = () => {
+      video.play().then(() => {
+        if (shouldBePlaying) setStatus("playing");
+      }).catch(() => {});
+    };
+
+    const loadVideo = () => {
+      if (hasLoaded) return;
+
+      const src = video.dataset.mediaVideoSrc;
+      if (!src) return;
+
+      video.muted = true;
+      video.playsInline = true;
+      video.setAttribute("muted", "");
+      video.setAttribute("playsinline", "");
+      video.setAttribute("webkit-playsinline", "");
+      video.src = src;
+      video.load();
+      hasLoaded = true;
+    };
+
+    const shouldResume = () => {
+      if (!isInView || document.hidden) return false;
+      if (activeMode === "autoplay") return !userPaused;
+      if (activeMode === "click") return userActivated && !userPaused;
+      return isHovering;
+    };
+
+    const playVideo = () => {
+      if (!isInView || document.hidden) return;
+
+      shouldBePlaying = true;
+      clearPauseTimer();
+      loadVideo();
+      setStatus(video.readyState < 3 ? "loading" : "playing");
+      playAttempt();
+    };
+
+    const pauseVideo = (delay = 0, reset = false) => {
+      shouldBePlaying = false;
+      clearPauseTimer();
+
+      pauseTimer = setTimeout(() => {
+        video.pause();
+        if (reset) video.currentTime = 0;
+      }, delay);
+    };
+
+    const handleHoverIn = () => {
+      if (!isInView || document.hidden) return;
+
+      isHovering = true;
+      clearPauseTimer();
+
+      if (!video.paused) {
+        shouldBePlaying = true;
+        setStatus("playing");
+        return;
+      }
+
+      playVideo();
+    };
+
+    const handleHoverOut = () => {
+      if (!isInView) return;
+
+      isHovering = false;
+      setStatus("not-active");
+      pauseVideo(pauseDelay, shouldResetOnPause);
+    };
+
+    const handleClick = () => {
+      if (!isInView || document.hidden) return;
+
+      clearPauseTimer();
+
+      if (video.paused) {
+        userActivated = true;
+        userPaused = false;
+        playVideo();
+      } else {
+        userActivated = true;
+        userPaused = true;
+        setStatus(activeMode === "click" ? "paused" : "not-active");
+        pauseVideo(pauseDelay, shouldResetOnPause);
+      }
+    };
+
+    const handleViewport = entries => {
+      entries.forEach(entry => {
+        if (entry.target !== mediaEl) return;
+
+        if (!isActivated && entry.isIntersecting) {
+          isActivated = true;
+
+          if (shouldUseClickToggle) {
+            clickTargets.forEach(toggleEl => on(toggleEl, "click", handleClick));
+          }
+
+          if (activeMode === "hover") {
+            on(mediaEl, "mouseenter", handleHoverIn);
+            on(mediaEl, "mouseleave", handleHoverOut);
+          }
+        }
+
+        isInView = entry.isIntersecting;
+
+        if (isInView) {
+          if (shouldResume()) playVideo();
+        } else {
+          isHovering = false;
+
+          if (!video.paused || shouldBePlaying) {
+            setStatus("paused");
+            pauseVideo(0, false);
+          }
+        }
+      });
+    };
+
+    const handlePageVisibilityChange = () => {
+      if (document.hidden) {
+        if (!video.paused || shouldBePlaying) {
+          setStatus("paused");
+          pauseVideo(0, false);
+        }
+        return;
+      }
+      if (shouldResume()) playVideo();
+    };
+
+    mediaEl.dataset.mediaStatus = "not-active";
+
+    const observer = new IntersectionObserver(handleViewport, {
+      rootMargin: `${rootMarginValue}% 0px ${rootMarginValue}% 0px`,
+      threshold: 0
+    });
+
+    observer.observe(mediaEl);
+
+    on(video, "playing", () => {if (shouldBePlaying) setStatus("playing");});
+    on(video, "waiting", () => {if (shouldBePlaying) setStatus("loading");});
+    on(video, "canplay", () => {if (shouldBePlaying && isInView && !document.hidden) playAttempt();});
+    on(video, "loadeddata", () => {if (shouldBePlaying && isInView && !document.hidden) playAttempt();});
+    on(video, "ended", () => {if (!shouldBePlaying || !isInView || document.hidden) return; video.currentTime = 0; playAttempt();});
+
+    on(document, "visibilitychange", handlePageVisibilityChange);
+
+    addCleanup(() => observer.disconnect());
+    addCleanup(() => {
+      clearPauseTimer();
+      shouldBePlaying = false;
+      video.pause();
+    });
+  });
+
+  initMediaSetup._cleanup = cleanupFns;
+}
+
+// -----------------------------------------
+// CUSTOM CURSOR
+// -----------------------------------------
+
+let cursorMouseX = 0, cursorMouseY = 0;
+
+function initCustomCursor() {
+  if (initCustomCursor._rafId != null) {
+    cancelAnimationFrame(initCustomCursor._rafId);
+    initCustomCursor._rafId = null;
+  }
+
+  const cursor = document.querySelector('[data-cursor="view"]');
+  if (!cursor) return;
+
+  const cards = document.querySelectorAll('[data-cursor-trigger]');
+  let cursorX = 0, cursorY = 0;
+
+  if (!initCustomCursor._mouseBound) {
+    initCustomCursor._mouseBound = true;
+    document.addEventListener('mousemove', function (e) {
+      cursorMouseX = e.clientX;
+      cursorMouseY = e.clientY;
+    });
+  }
+
+  cards.forEach(function (card) {
+    card.addEventListener('mouseenter', function () { cursor.dataset.cursorActive = 'true'; });
+    card.addEventListener('mouseleave', function () { cursor.dataset.cursorActive = 'false'; });
+  });
+
+  function animate() {
+    cursorX += (cursorMouseX - cursorX) * 0.12;
+    cursorY += (cursorMouseY - cursorY) * 0.12;
+    cursor.style.left = cursorX + 'px';
+    cursor.style.top = cursorY + 'px';
+    initCustomCursor._rafId = requestAnimationFrame(animate);
+  }
+  animate();
+}
+
+// -----------------------------------------
+// WORK VIEW TOGGLE (Grid / Index)
+// -----------------------------------------
+
+let workViewToggleBound = false;
+
+function initWorkViewToggle() {
+  if (workViewToggleBound) return;
+  workViewToggleBound = true;
+  document.addEventListener("click", function (e) {
+    var workBtn = e.target.closest("[data-view-work]");
+    var indexBtn = e.target.closest("[data-view-index]");
+    if (workBtn) {
+      e.preventDefault();
+      var wrap = workBtn.closest(".work_new_wrap") || document.querySelector(".work_new_wrap");
+      if (wrap) {
+        wrap.classList.remove("is-active");
+        document.body.classList.remove("u-theme-brand");
+      }
+    } else if (indexBtn) {
+      e.preventDefault();
+      var wrap = indexBtn.closest(".work_new_wrap") || document.querySelector(".work_new_wrap");
+      if (wrap) {
+        wrap.classList.add("is-active");
+        document.body.classList.add("u-theme-brand");
+      }
+    }
+  });
+}
+
+// -----------------------------------------
+// FOLIO GRID / LIST (Flip)
+// -----------------------------------------
+
+const FOLIO_FLIP_TARGETS = ".folio_item_visual, .folio_item_desc";
+const FOLIO_FLIP_LISTS = ".folio_cms_list, .folio_cms_list_second";
+
+let folioFlipViewToggleBound = false;
+
+function syncFolioFlipViewInitialState() {
+  if (!document.querySelector("[data-view-default]")) return;
+  document.querySelectorAll("[data-view-default]").forEach(function (el) {
+    el.classList.add("active");
+  });
+  document.querySelectorAll("[data-view-list]").forEach(function (el) {
+    el.classList.remove("active");
+  });
+  document.querySelectorAll(FOLIO_FLIP_LISTS).forEach(function (el) {
+    el.classList.remove("list-view");
+  });
+}
+
+function folioFlipApplyListView(useListView) {
+  ensureFlipPluginRegistered();
+  var FlipRef = typeof window !== "undefined" ? window.Flip : undefined;
+  var lists = document.querySelectorAll(FOLIO_FLIP_LISTS);
+  if (typeof FlipRef === "undefined" || !FlipRef || reducedMotion) {
+    lists.forEach(function (list) {
+      list.classList.toggle("list-view", !!useListView);
+    });
+    return;
+  }
+  var state = FlipRef.getState(FOLIO_FLIP_TARGETS);
+  lists.forEach(function (list) {
+    list.classList.toggle("list-view", !!useListView);
+  });
+  FlipRef.from(state, {
+    duration: 0.5,
+    nested: true,
+    ease: "power1.inOut",
+  });
+}
+
+function initFolioFlipViewToggle() {
+  if (folioFlipViewToggleBound) return;
+  folioFlipViewToggleBound = true;
+
+  ensureFlipPluginRegistered();
+  syncFolioFlipViewInitialState();
+
+  document.addEventListener(
+    "click",
+    function (e) {
+      var defaultBtn = e.target.closest("[data-view-default]");
+      var listBtn = e.target.closest("[data-view-list]");
+      if (!defaultBtn && !listBtn) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (defaultBtn) {
+        document.querySelectorAll("[data-view-default]").forEach(function (el) {
+          el.classList.add("active");
+        });
+        document.querySelectorAll("[data-view-list]").forEach(function (el) {
+          el.classList.remove("active");
+        });
+        folioFlipApplyListView(false);
+        return;
+      }
+
+      document.querySelectorAll("[data-view-list]").forEach(function (el) {
+        el.classList.add("active");
+      });
+      document.querySelectorAll("[data-view-default]").forEach(function (el) {
+        el.classList.remove("active");
+      });
+      folioFlipApplyListView(true);
+    },
+    true
+  );
+}
+
+function scheduleFolioFlipViewToggleInit() {
+  function run() {
+    if (!folioFlipViewToggleBound) initFolioFlipViewToggle();
+  }
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", run, { once: true });
+  } else {
+    requestAnimationFrame(run);
+  }
+}
+scheduleFolioFlipViewToggleInit();
+
+// -----------------------------------------
 // GENERIC + HELPERS
 // -----------------------------------------
 
@@ -412,7 +820,7 @@ function initBarbaNavUpdate(data) {
 // -----------------------------------------
 
 // -----------------------------------------
-// NAV BLEND MODE (ab 101vh Scroll)
+// NAV BLEND MODE: Home = ab 101vh togglen, sonst immer difference
 // -----------------------------------------
 function initNavBlend() {
   var nav = document.querySelector(".nav_comp");
@@ -420,6 +828,12 @@ function initNavBlend() {
   if (nav._navBlendTrigger) {
     nav._navBlendTrigger.kill();
     nav._navBlendTrigger = null;
+  }
+
+  var onHome = !!document.querySelector('[data-page-name="Home"]');
+  if (!onHome) {
+    nav.style.mixBlendMode = "difference";
+    return;
   }
 
   function setBlend(active) {
