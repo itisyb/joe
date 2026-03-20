@@ -77,17 +77,84 @@ function initOnceFunctions() {
 }
 
 function initBeforeEnterFunctions(next) {
-  nextPage = next || document;
+    nextPage = next || document;
 
-  // Runs before the enter animation
-  // Close lightbox on page transition
-  const wrapper = document.querySelector('[data-bunny-lightbox-status="active"]');
-  if (wrapper) {
-    wrapper.setAttribute('data-bunny-lightbox-status', 'not-active');
-    const video = wrapper.querySelector('video');
-    if (video) { try { video.pause(); } catch(_) {} }
+    // Ensure a lightbox wrapper lives on document.body.
+    // On the first visit, the lightbox may only exist inside the incoming Barba container.
+    // We need to rescue ONE copy to body before nuking the rest as duplicates.
+    if (next && next !== document) {
+      var bodyHasWrapper = document.querySelector('body > [data-bunny-lightbox-status]');
+      if (!bodyHasWrapper) {
+        var firstWrapper = next.querySelector('[data-bunny-lightbox-status]');
+        if (firstWrapper) {
+          document.body.appendChild(firstWrapper);
+          console.log('[LB BARBA beforeEnter] Rescued lightbox wrapper to document.body (first time)');
+          // Init the player now — the guard inside prevents double-init
+          initBunnyLightboxPlayer();
+        }
+      }
+
+      // Remove remaining duplicates from incoming container
+      var dupes = next.querySelectorAll('[data-bunny-lightbox-status]');
+      console.log('[LB BARBA beforeEnter] Removing', dupes.length, 'duplicate lightbox(es) from incoming container');
+      dupes.forEach(function(el) { el.remove(); });
+    }
+
+    // Log state of the body-level wrapper
+    var bodyWrapper = document.querySelector('body > [data-bunny-lightbox-status]');
+    console.log('[LB BARBA beforeEnter] Body-level wrapper:', {
+      exists: !!bodyWrapper,
+      status: bodyWrapper ? bodyWrapper.getAttribute('data-bunny-lightbox-status') : null,
+      connected: bodyWrapper ? bodyWrapper.isConnected : false,
+    });
+
+    // Close lightbox on page transition — FULL cleanup
+    const wrapper = document.querySelector('[data-bunny-lightbox-status="active"]');
+    if (wrapper) {
+      console.log('[LB BARBA beforeEnter] Active lightbox found — cleaning up');
+      wrapper.setAttribute('data-bunny-lightbox-status', 'not-active');
+      wrapper.style.display = 'none';
+      wrapper.style.opacity = '0';
+      wrapper.style.visibility = 'hidden';
+      wrapper.style.pointerEvents = 'none';
+
+      const player = wrapper.querySelector('[data-bunny-lightbox-init]');
+      const video = wrapper.querySelector('video');
+
+      if (player && player._hls) {
+        try { player._hls.destroy(); } catch (_) {}
+        player._hls = null;
+        console.log('[LB BARBA beforeEnter] HLS destroyed');
+      }
+
+      if (video) {
+        try { video.pause(); } catch (_) {}
+        try {
+          video.removeAttribute('src');
+          video.load();
+        } catch (_) {}
+        console.log('[LB BARBA beforeEnter] Video teardown complete');
+      }
+
+      if (player) {
+        player.setAttribute('data-player-status', 'idle');
+        player.setAttribute('data-player-activated', 'false');
+      }
+    } else {
+      // Even if not "active", force-hide the body wrapper during transitions
+      var bodyW = document.querySelector('body > [data-bunny-lightbox-status]');
+      if (bodyW) {
+        bodyW.style.display = 'none';
+        bodyW.style.opacity = '0';
+        bodyW.style.visibility = 'hidden';
+        bodyW.style.pointerEvents = 'none';
+        console.log('[LB BARBA beforeEnter] Force-hid body wrapper (was not-active but ensuring hidden)');
+      } else {
+        console.log('[LB BARBA beforeEnter] No active lightbox to clean up');
+      }
+    }
   }
-}
+  
 
 function initAfterEnterFunctions(next) {
   nextPage = next || document;
@@ -148,16 +215,10 @@ function runPageOnceAnimation(next) {
 
 function runPageLeaveAnimation(current, next) {
   const transitionWrap = document.querySelector("[data-transition-wrap]");
-    if (!transitionWrap) {
-        // No transition overlay found — just remove current instantly
-        const tl = gsap.timeline();
-        tl.set(current, { autoAlpha: 0, onComplete: () => current.remove() });
-        return tl;
-    }
-  
   const transitionPanel = transitionWrap.querySelector("[data-transition-panel]");
   const transitionLabel = transitionWrap.querySelector("[data-transition-label]");
-    
+  const transitionLabelText = transitionWrap.querySelector("[data-transition-label-text]");
+
   const nextPageName = next.getAttribute("data-page-name")
   transitionLabelText.innerText = nextPageName || "Hi there";
 
@@ -1878,21 +1939,37 @@ function typoScrollUpdateActive() {
 // BUNNY LIGHTBOX PLAYER
 // -----------------------------------------
 
+var _bunnyLightboxInitialized = false;
 function initBunnyLightboxPlayer() {
+  console.log('[LB INIT] initBunnyLightboxPlayer() called, alreadyInit:', _bunnyLightboxInitialized);
+  if (_bunnyLightboxInitialized) { console.log('[LB INIT] Already initialized, skipping'); return; }
   var player = document.querySelector('[data-bunny-lightbox-init]');
-  if (!player) return;
+  if (!player) { console.warn('[LB INIT] No player element found [data-bunny-lightbox-init]'); return; }
 
   var wrapper = player.closest('[data-bunny-lightbox-status]');
-  if (!wrapper) return;
+  if (!wrapper) { console.warn('[LB INIT] No wrapper found [data-bunny-lightbox-status]'); return; }
+
+  console.log('[LB INIT] wrapper parent before move:', wrapper.parentNode?.tagName, wrapper.parentNode?.getAttribute?.('data-barba'));
 
   // Keep the lightbox outside Barba page containers so it survives swaps
   // and fixed positioning remains relative to the viewport.
   if (wrapper.parentNode !== document.body) {
     document.body.appendChild(wrapper);
+    console.log('[LB INIT] Moved wrapper to document.body');
+  } else {
+    console.log('[LB INIT] Wrapper already on document.body');
   }
 
   var video = player.querySelector('video');
-  if (!video) return;
+  if (!video) { console.warn('[LB INIT] No video element found'); return; }
+
+  console.log('[LB INIT] Setup complete — player, wrapper, video all found');
+
+  // Force-hide wrapper on init (it starts as not-active)
+  wrapper.style.display = 'none';
+  wrapper.style.opacity = '0';
+  wrapper.style.visibility = 'hidden';
+  wrapper.style.pointerEvents = 'none';
 
   try { video.pause(); } catch(_) {}
   try { video.removeAttribute('src'); video.load(); } catch(_) {}
@@ -1920,6 +1997,52 @@ function initBunnyLightboxPlayer() {
   var initialMuted = player.getAttribute('data-player-muted') === 'true';
 
   var pendingPlay = false;
+
+  // === OBSERVABILITY: Track wrapper attribute changes and DOM removal ===
+  var _lbObserver = new MutationObserver(function(mutations) {
+    mutations.forEach(function(m) {
+      if (m.type === 'attributes' && m.attributeName === 'data-bunny-lightbox-status') {
+        console.log('[LB OBSERVER] wrapper status changed to:', wrapper.getAttribute('data-bunny-lightbox-status'),
+          '(was:', m.oldValue, ') — stack:', new Error().stack.split('\n').slice(1, 4).join(' <- '));
+      }
+    });
+  });
+  _lbObserver.observe(wrapper, { attributes: true, attributeOldValue: true, attributeFilter: ['data-bunny-lightbox-status'] });
+
+  // Track if wrapper gets removed from body
+  var _bodyObserver = new MutationObserver(function(mutations) {
+    mutations.forEach(function(m) {
+      m.removedNodes.forEach(function(node) {
+        if (node === wrapper) {
+          console.error('[LB OBSERVER] ⚠️ WRAPPER REMOVED FROM DOM!', {
+            parent: m.target.tagName,
+            connected: wrapper.isConnected,
+          });
+        }
+      });
+    });
+  });
+  _bodyObserver.observe(document.body, { childList: true });
+
+  // Track video element errors
+  video.addEventListener('error', function(e) {
+    console.error('[LB VIDEO ERROR]', {
+      code: video.error?.code,
+      message: video.error?.message,
+      src: video.src,
+      readyState: video.readyState,
+      networkState: video.networkState,
+    });
+  });
+
+  // Track video key lifecycle events
+  ['loadstart', 'loadeddata', 'loadedmetadata', 'canplay', 'playing', 'pause', 'ended', 'waiting', 'stalled', 'suspend', 'emptied', 'abort'].forEach(function(evt) {
+    video.addEventListener(evt, function() {
+      console.log('[LB VIDEO EVENT]', evt, { readyState: video.readyState, currentTime: video.currentTime, paused: video.paused, src: video.src?.substring(0, 60) });
+    });
+  });
+
+  console.log('[LB INIT] Observers attached — wrapper, body, video events');
 
   video.loop = false;
   setMutedState(initialMuted);
@@ -2034,32 +2157,53 @@ function initBunnyLightboxPlayer() {
   setupLightboxClamp(player, wrapper, video, updateSize);
 
   function withAttach(src, onReady) {
+    console.log('[LB withAttach]', { src, isSafariNative, canUseHlsJs, videoConnected: video.isConnected });
     if (isSafariNative) {
+      console.log('[LB withAttach] Safari native HLS path');
       video.preload = 'auto';
       video.src = src;
-      video.addEventListener('loadedmetadata', onReady, { once: true });
+      video.addEventListener('loadedmetadata', function() {
+        console.log('[LB withAttach] Safari loadedmetadata fired');
+        onReady();
+      }, { once: true });
       return;
     }
     if (canUseHlsJs) {
+      console.log('[LB withAttach] HLS.js path');
       var hls = new Hls({ maxBufferLength: 10 });
       player._hls = hls;
       hls.attachMedia(video);
-      hls.on(Hls.Events.MEDIA_ATTACHED, function(){ hls.loadSource(src); });
-      hls.on(Hls.Events.MANIFEST_PARSED, function(){ onReady(); });
+      hls.on(Hls.Events.MEDIA_ATTACHED, function(){
+        console.log('[LB withAttach] HLS MEDIA_ATTACHED, loading source');
+        hls.loadSource(src);
+      });
+      hls.on(Hls.Events.MANIFEST_PARSED, function(){
+        console.log('[LB withAttach] HLS MANIFEST_PARSED — calling onReady');
+        onReady();
+      });
+      hls.on(Hls.Events.ERROR, function(event, data){
+        console.error('[LB withAttach] HLS ERROR', { type: data.type, details: data.details, fatal: data.fatal, reason: data.reason });
+      });
       hls.on(Hls.Events.LEVEL_LOADED, function(e, data){
+        console.log('[LB withAttach] HLS LEVEL_LOADED', { duration: data?.details?.totalduration });
         if (data && data.details && isFinite(data.details.totalduration) && timeDurationEls.length) {
           setText(timeDurationEls, formatTime(data.details.totalduration));
         }
       });
       return;
     }
+    console.log('[LB withAttach] Generic fallback path');
     video.preload = 'auto';
     video.src = src;
-    video.addEventListener('loadedmetadata', onReady, { once: true });
+    video.addEventListener('loadedmetadata', function() {
+      console.log('[LB withAttach] Generic loadedmetadata fired');
+      onReady();
+    }, { once: true });
   }
 
   function attachMediaFor(src) {
-    if (currentSrc === src && isAttached) return;
+    console.log('[LB attachMediaFor]', { src, currentSrc, isAttached, earlyBail: (currentSrc === src && isAttached) });
+    if (currentSrc === src && isAttached) { console.log('[LB attachMediaFor] Early bail — already attached'); return; }
     if (player._hls) { try { player._hls.destroy(); } catch(_) {} player._hls = null; }
     if (timeDurationEls.length) setText(timeDurationEls, '00:00');
 
@@ -2067,34 +2211,101 @@ function initBunnyLightboxPlayer() {
     isAttached = true;
 
     withAttach(src, function onReady(){
+      console.log('[LB attachMediaFor:onReady]', {
+        pendingPlay,
+        autoStartOnReady,
+        wrapperStatus: wrapper.getAttribute('data-bunny-lightbox-status'),
+        videoDuration: video.duration,
+        videoReadyState: video.readyState,
+      });
       readyIfIdle(player, pendingPlay);
       updateBeforeRatioIOSSafe();
       if (typeof player._applyClamp === 'function') player._applyClamp();
       if (timeDurationEls.length && video.duration) setText(timeDurationEls, formatTime(video.duration));
 
       if (autoStartOnReady && wrapper.getAttribute('data-bunny-lightbox-status') === 'active') {
+        console.log('[LB attachMediaFor:onReady] Auto-starting playback');
         setStatus('loading');
         safePlay(video);
         autoStartOnReady = false;
+      } else {
+        console.log('[LB attachMediaFor:onReady] NOT auto-starting', { autoStartOnReady, wrapperStatus: wrapper.getAttribute('data-bunny-lightbox-status') });
       }
     });
   }
 
+  // Force inline styles to guarantee visibility state regardless of Webflow CSS.
+  // When the wrapper lives outside the Webflow page container (on document.body),
+  // Webflow's attribute selectors may not apply correctly.
+  function applyWrapperVisibility(isActive) {
+    if (isActive) {
+      wrapper.style.display = '';
+      wrapper.style.opacity = '1';
+      wrapper.style.visibility = 'visible';
+      wrapper.style.pointerEvents = 'auto';
+    } else {
+      wrapper.style.display = 'none';
+      wrapper.style.opacity = '0';
+      wrapper.style.visibility = 'hidden';
+      wrapper.style.pointerEvents = 'none';
+    }
+  }
+
   function ensureOpenUI(isActive) {
     var state = isActive ? 'active' : 'not-active';
-    if (wrapper.getAttribute('data-bunny-lightbox-status') !== state) {
+    var currentState = wrapper.getAttribute('data-bunny-lightbox-status');
+    console.log('[LB ensureOpenUI]', {
+      isActive,
+      targetState: state,
+      currentState,
+      wrapperConnected: wrapper.isConnected,
+      wrapperParent: wrapper.parentNode?.tagName,
+      wrapperDisplay: getComputedStyle(wrapper).display,
+      wrapperVisibility: getComputedStyle(wrapper).visibility,
+      wrapperOpacity: getComputedStyle(wrapper).opacity,
+      wrapperZIndex: getComputedStyle(wrapper).zIndex,
+      wrapperPointerEvents: getComputedStyle(wrapper).pointerEvents,
+    });
+    if (currentState !== state) {
       wrapper.setAttribute('data-bunny-lightbox-status', state);
+      console.log('[LB ensureOpenUI] Status changed to:', state);
+    } else {
+      console.log('[LB ensureOpenUI] Status already correct:', state);
     }
+    applyWrapperVisibility(isActive);
     if (isActive && typeof player._applyClamp === 'function') player._applyClamp();
   }
 
   function isSameSrc(next){ return currentSrc && currentSrc === next; }
   function planOnOpen(next) {
     var same = isSameSrc(next);
-    if (!same) {
-      try { if (!video.paused && !video.ended) video.pause(); } catch(_) {}
-      if (player._hls) { try { player._hls.destroy(); } catch(_) {} player._hls = null; }
-      isAttached = false; currentSrc = '';
+    var videoUsable = same && video.readyState >= 1;
+
+    console.log('[LB planOnOpen]', {
+      nextSrc: next,
+      currentSrc,
+      same,
+      videoUsable,
+      videoReadyState: video.readyState,
+      videoPaused: video.paused,
+      videoSrc: video.src,
+      isAttached,
+      autoplay,
+      hlsExists: !!player._hls,
+      videoConnected: video.isConnected,
+    });
+
+    if (!same || !videoUsable) {
+      console.log('[LB planOnOpen] Full teardown + reattach path');
+      try { if (!video.paused && !video.ended) video.pause(); } catch (_) {}
+      if (player._hls) {
+        try { player._hls.destroy(); } catch (_) {}
+        player._hls = null;
+      }
+
+      isAttached = false;
+      currentSrc = '';
+
       if (timeDurationEls.length) setText(timeDurationEls, '00:00');
       setActivated(false);
       setStatus('idle');
@@ -2104,27 +2315,33 @@ function initBunnyLightboxPlayer() {
       pendingPlay = !!autoplay;
       return;
     }
+
+    console.log('[LB planOnOpen] Same src + usable path, autoplay:', autoplay);
     autoStartOnReady = !!autoplay;
     if (autoplay) {
       setStatus('loading');
       safePlay(video);
     } else {
-      try { if (!video.paused && !video.ended) video.pause(); } catch(_) {}
+      try { if (!video.paused && !video.ended) video.pause(); } catch (_) {}
       setActivated(false);
       setStatus('paused');
     }
   }
+  
 
   function openLightbox(src, placeholderUrl) {
+    console.log('[LB DEBUG] openLightbox called', { src, placeholderUrl, wrapperConnected: wrapper.isConnected });
     if (!src) return;
 
     function activate() {
+      console.log('[LB DEBUG] activate() called, about to ensureOpenUI(true)');
       ensureOpenUI(true);
       planOnOpen(src);
     }
 
     if (playerPlaceholderImg && placeholderUrl) {
       var needsSwap = playerPlaceholderImg.getAttribute('src') !== placeholderUrl;
+      console.log('[LB DEBUG] placeholder path', { needsSwap, complete: playerPlaceholderImg.complete, naturalWidth: playerPlaceholderImg.naturalWidth });
       if (needsSwap || !playerPlaceholderImg.complete || !playerPlaceholderImg.naturalWidth) {
         playerPlaceholderImg.onload = function(){ playerPlaceholderImg.onload = null; activate(); };
         playerPlaceholderImg.onerror = function(){ playerPlaceholderImg.onerror = null; activate(); };
@@ -2134,6 +2351,7 @@ function initBunnyLightboxPlayer() {
         activate();
       }
     } else {
+      console.log('[LB DEBUG] no placeholder, direct activate');
       activate();
     }
   }
@@ -2302,6 +2520,7 @@ function initBunnyLightboxPlayer() {
   });
 
   function closeLightbox() {
+    console.log('[LB closeLightbox] called', { wrapperStatus: wrapper.getAttribute('data-bunny-lightbox-status'), videoTime: video.currentTime });
     ensureOpenUI(false);
 
     var hasPlayed = false;
@@ -2319,28 +2538,67 @@ function initBunnyLightboxPlayer() {
 
     setActivated(false);
     setStatus(hasPlayed ? 'paused' : 'idle');
+    console.log('[LB closeLightbox] done', { hasPlayed, finalStatus: player.getAttribute('data-player-status') });
   }
 
-  document.addEventListener('click', function(e) {
+  document.addEventListener('click', function (e) {
     var openBtn = e.target.closest('[data-bunny-lightbox-control="open"]');
     if (openBtn) {
-      console.log('LIGHTBOX OPEN triggered by:', openBtn, 'during transition:', barba.transitions.isRunning);
-      if (barba.transitions.isRunning) return;
+      console.log('[LB DEBUG] open btn clicked', {
+        src: openBtn.getAttribute('data-bunny-lightbox-src'),
+        wrapperInDOM: !!document.querySelector('[data-bunny-lightbox-status]'),
+        wrapperParent: wrapper ? wrapper.parentNode?.tagName : 'no wrapper',
+        wrapperConnected: wrapper ? wrapper.isConnected : false,
+        playerConnected: player ? player.isConnected : false,
+        videoConnected: video ? video.isConnected : false,
+        btnInBarbaContainer: !!openBtn.closest('[data-barba="container"]'),
+      });
+
+      // Block clicks during Barba transitions entirely.
+      // The open button may live in the OLD container that's being animated out.
+      if (typeof barba !== 'undefined' && barba.transitions && barba.transitions.isRunning) {
+        console.log('[LB DEBUG] Barba transition running — ignoring click');
+        return;
+      }
+
+      var currentContainer = document.querySelector('[data-barba="container"]');
+      if (currentContainer && currentContainer.style.position === 'fixed') {
+        console.log('[LB DEBUG] container is fixed, deferring');
+        var src = openBtn.getAttribute('data-bunny-lightbox-src') || '';
+        if (!src) return;
+        var imgEl = openBtn.querySelector('[data-bunny-lightbox-placeholder]');
+        var placeholderUrl = imgEl ? imgEl.getAttribute('src') : '';
+
+        var checkInterval = setInterval(function () {
+          var container = document.querySelector('[data-barba="container"]');
+          if (!container || container.style.position !== 'fixed') {
+            clearInterval(checkInterval);
+            openLightbox(src, placeholderUrl);
+          }
+        }, 100);
+
+        setTimeout(function () { clearInterval(checkInterval); }, 3000);
+        return;
+      }
+
       var src = openBtn.getAttribute('data-bunny-lightbox-src') || '';
-      if (!src) return;
+      if (!src) { console.log('[LB DEBUG] no src, aborting'); return; }
       var imgEl = openBtn.querySelector('[data-bunny-lightbox-placeholder]');
       var placeholderUrl = imgEl ? imgEl.getAttribute('src') : '';
+      console.log('[LB DEBUG] calling openLightbox', src, placeholderUrl);
       openLightbox(src, placeholderUrl);
       return;
     }
+   
     var closeBtn = e.target.closest('[data-bunny-lightbox-control="close"]');
     if (closeBtn) {
       var closeInWrapper = closeBtn.closest('[data-bunny-lightbox-status]');
+      console.log('[LB CLICK] Close btn clicked', { inCorrectWrapper: closeInWrapper === wrapper, wrapperMatch: !!closeInWrapper });
       if (closeInWrapper === wrapper) closeLightbox();
       return;
     }
   });
-
+  
   document.addEventListener('keydown', function(e) {
     if (e.key === 'Escape') closeLightbox();
   });
@@ -2359,8 +2617,15 @@ function initBunnyLightboxPlayer() {
   }
 
   function safePlay(video) {
+    console.log('[LB safePlay] Attempting play', { readyState: video.readyState, paused: video.paused, src: video.src?.substring(0, 60) });
     var p = video.play();
-    if (p && typeof p.then === 'function') p.catch(function(){});
+    if (p && typeof p.then === 'function') {
+      p.then(function() {
+        console.log('[LB safePlay] Play succeeded');
+      }).catch(function(err) {
+        console.warn('[LB safePlay] Play rejected:', err.name, err.message);
+      });
+    }
   }
 
   function readyIfIdle(player, pendingPlay) {
@@ -2439,4 +2704,64 @@ st
         .catch(function () {});
     });
   }
+
+  // === GLOBAL DEBUG HELPER ===
+  // Call window.__lbDebug() in the console at any time to see full lightbox state
+  window.__lbDebug = function() {
+    var wrapperInBody = document.querySelector('body > [data-bunny-lightbox-status]');
+    var allWrappers = document.querySelectorAll('[data-bunny-lightbox-status]');
+    var allOpenBtns = document.querySelectorAll('[data-bunny-lightbox-control="open"]');
+    var barbaContainers = document.querySelectorAll('[data-barba="container"]');
+
+    var info = {
+      '=== WRAPPER STATE ===': '',
+      closuredWrapperConnected: wrapper.isConnected,
+      closuredWrapperParent: wrapper.parentNode?.tagName,
+      closuredWrapperStatus: wrapper.getAttribute('data-bunny-lightbox-status'),
+      bodyWrapperExists: !!wrapperInBody,
+      bodyWrapperSameAsClosure: wrapperInBody === wrapper,
+      totalWrappersInDOM: allWrappers.length,
+      '=== PLAYER STATE ===': '',
+      closuredPlayerConnected: player.isConnected,
+      playerStatus: player.getAttribute('data-player-status'),
+      playerActivated: player.getAttribute('data-player-activated'),
+      '=== VIDEO STATE ===': '',
+      closuredVideoConnected: video.isConnected,
+      videoSrc: video.src?.substring(0, 80),
+      videoReadyState: video.readyState,
+      videoPaused: video.paused,
+      videoCurrentTime: video.currentTime,
+      videoDuration: video.duration,
+      videoNetworkState: video.networkState,
+      videoError: video.error ? { code: video.error.code, message: video.error.message } : null,
+      '=== INTERNAL STATE ===': '',
+      isAttached,
+      currentSrc: currentSrc?.substring(0, 80),
+      autoplay,
+      autoStartOnReady,
+      pendingPlay,
+      hlsInstance: !!player._hls,
+      isSafariNative,
+      canUseHlsJs,
+      '=== BARBA STATE ===': '',
+      barbaContainerCount: barbaContainers.length,
+      barbaContainerPositions: Array.from(barbaContainers).map(function(c) { return c.style.position || 'static'; }),
+      barbaIsRunning: typeof barba !== 'undefined' && barba.transitions ? barba.transitions.isRunning : 'unknown',
+      '=== OPEN BUTTONS ===': '',
+      openBtnCount: allOpenBtns.length,
+      openBtns: Array.from(allOpenBtns).map(function(btn) {
+        return {
+          src: btn.getAttribute('data-bunny-lightbox-src')?.substring(0, 60),
+          connected: btn.isConnected,
+          inBarba: !!btn.closest('[data-barba="container"]'),
+          visible: btn.offsetParent !== null,
+        };
+      }),
+    };
+    console.table ? console.log(info) : console.log(JSON.stringify(info, null, 2));
+    return info;
+  };
+
+  _bunnyLightboxInitialized = true;
+  console.log('[LB INIT] ✅ initBunnyLightboxPlayer complete. Call window.__lbDebug() anytime for full state dump.');
 }
