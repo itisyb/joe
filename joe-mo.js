@@ -2667,31 +2667,54 @@ function getParallaxScrollY() {
 function initParallax(scope) {
   var root = scope || document;
 
+  function clamp(value, min, max) {
+    return Math.min(Math.max(value, min), max);
+  }
+
+  function syncParallaxBounds(img, scrollY) {
+    var y = scrollY != null ? scrollY : getParallaxScrollY();
+    var rect = img.boundsEl.getBoundingClientRect();
+    var travel = (window.innerHeight + rect.height) * 0.5 * img.speed;
+    var autoScale = 1 + (travel * 2) / rect.height;
+    img.boundsTop = rect.top + y;
+    img.boundsBottom = rect.bottom + y;
+    img.scale = Math.max(img.baseScale, autoScale);
+    img.maxShift = Math.max(0, rect.height * (img.scale - 1) * 0.5);
+  }
+
   parallaxImages = [];
   parallaxRafRunning = false;
 
   root.querySelectorAll("[data-parallax]").forEach(function (el) {
     var speed = parseFloat(el.dataset.parallaxSpeed) || 0.2;
-    var scale = parseFloat(el.dataset.parallaxScale) || 1.25;
-    var rect = el.getBoundingClientRect();
+    var baseScale = parseFloat(el.dataset.parallaxScale) || 1.25;
+    var boundsEl = el.parentElement || el;
+    var rect = boundsEl.getBoundingClientRect();
     var scrollY = getParallaxScrollY();
     var boundsTop = rect.top + scrollY;
     var boundsBottom = rect.bottom + scrollY;
+    var travel = (window.innerHeight + rect.height) * 0.5 * speed;
+    var scale = Math.max(baseScale, 1 + (travel * 2) / rect.height);
+    var maxShift = Math.max(0, rect.height * (scale - 1) * 0.5);
 
     if (!el.dataset.parallaxInitialized) {
       el.dataset.parallaxInitialized = "true";
       el.style.willChange = "transform";
+      el.style.transformOrigin = "50% 50%";
       el.style.transform = "translateY(0px) scale(" + scale + ")";
     }
 
     parallaxImages.push({
       el: el,
+      boundsEl: boundsEl,
       speed: speed,
+      baseScale: baseScale,
       scale: scale,
       currentY: 0,
       targetY: 0,
       boundsTop: boundsTop,
       boundsBottom: boundsBottom,
+      maxShift: maxShift,
     });
   });
 
@@ -2702,17 +2725,19 @@ function initParallax(scope) {
     window.addEventListener("resize", function () {
       var scrollY = getParallaxScrollY();
       parallaxImages.forEach(function (img) {
-        var rect = img.el.getBoundingClientRect();
-        img.boundsTop = rect.top + scrollY;
-        img.boundsBottom = rect.bottom + scrollY;
+        syncParallaxBounds(img, scrollY);
       });
+      onParallaxScroll(scrollY);
     });
   }
 
   function onParallaxScroll(scrollY) {
     var y = scrollY != null ? scrollY : getParallaxScrollY();
+    var viewportCenter = y + window.innerHeight * 0.5;
     parallaxImages.forEach(function (img) {
-      img.targetY = (y - img.boundsTop) * img.speed;
+      var elementCenter = (img.boundsTop + img.boundsBottom) * 0.5;
+      var rawY = (viewportCenter - elementCenter) * img.speed;
+      img.targetY = clamp(rawY, -img.maxShift, img.maxShift);
     });
   }
 
