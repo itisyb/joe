@@ -64,6 +64,13 @@ CustomEase.create("osmo", "0.625, 0.05, 0, 1");
 gsap.defaults({ ease: "osmo", duration: durationDefault });
 
 var _fontsReady = document.fonts ? document.fonts.ready : Promise.resolve();
+var _forceCloseNavMenuForTransition = null;
+
+function forceCloseNavMenuForTransition() {
+  if (typeof _forceCloseNavMenuForTransition === "function") {
+    _forceCloseNavMenuForTransition();
+  }
+}
 
 
 
@@ -675,6 +682,8 @@ function runPageOnceAnimation(next) {
 }
 
 function runPageLeaveAnimation(current, next) {
+  forceCloseNavMenuForTransition();
+
   const transitionWrap = document.querySelector("[data-transition-wrap]");
   const transitionPanel = transitionWrap.querySelector("[data-transition-panel]");
   const transitionLabel = transitionWrap.querySelector("[data-transition-label]");
@@ -1768,6 +1777,30 @@ function initNavWrapInteractive(scope) {
       scrambleTimers = [];
     }
 
+    function getMobileLinkEl(linkWrap) {
+      if (!linkWrap || !linkWrap.querySelector) return null;
+      if (linkWrap.matches && linkWrap.matches("a[href]")) return linkWrap;
+      return linkWrap.querySelector("a[href]");
+    }
+
+    function getMobileLinkUrl(linkWrap) {
+      var linkEl = getMobileLinkEl(linkWrap);
+      var href = linkEl && linkEl.getAttribute("href");
+      if (!href || href === "#" || href.charAt(0) === "#") return null;
+      if (href.indexOf("mailto:") === 0 || href.indexOf("tel:") === 0) return null;
+      if (linkEl.hasAttribute("download")) return null;
+      if (linkEl.target && linkEl.target !== "_self") return null;
+
+      try {
+        var url = new URL(href, window.location.href);
+        if (url.origin !== window.location.origin) return null;
+        if (url.pathname === window.location.pathname && url.search === window.location.search) return null;
+        return url.href;
+      } catch (_) {
+        return null;
+      }
+    }
+
     function openMenu() {
       isOpen = true;
       menu.classList.add("is-active");
@@ -1801,16 +1834,37 @@ function initNavWrapInteractive(scope) {
       }, 300);
     }
 
-    function closeMenu() {
+    function closeMenu(options) {
+      options = options || {};
+      var immediate = !!options.immediate;
+      var restoreFocus = options.restoreFocus !== false;
+
       isOpen = false;
       toggle.setAttribute("aria-expanded", "false");
       toggle.setAttribute("aria-label", "Open menu");
       if (wordmark) wordmark.style.opacity = "0";
       clearScrambles();
 
+      mobileLinks.forEach(function (a) {
+        a.setAttribute("tabindex", "-1");
+      });
+
+      if (immediate) {
+        cancelAnimationFrame(rafId);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        menu.classList.remove("is-active", "is-settled");
+        menu.setAttribute("aria-hidden", "true");
+        mobileLinks.forEach(function (a) {
+          a.style.transition = "";
+          a.style.opacity = "";
+          a.style.transform = "";
+        });
+        if (restoreFocus) toggle.focus();
+        return;
+      }
+
       var reversed = mobileLinks.slice().reverse();
       reversed.forEach(function (a, i) {
-        a.setAttribute("tabindex", "-1");
         a.style.transition =
           "opacity 0.22s cubic-bezier(0.4,0,1,1) " +
           i * 35 +
@@ -1832,8 +1886,13 @@ function initNavWrapInteractive(scope) {
           a.style.transition = "";
         });
       }, 750);
-      toggle.focus();
+      if (restoreFocus) toggle.focus();
     }
+
+    _forceCloseNavMenuForTransition = function () {
+      if (!isOpen) return;
+      closeMenu({ immediate: true, restoreFocus: false });
+    };
 
     toggle.addEventListener("click", function () {
       if (isOpen) closeMenu();
@@ -1862,8 +1921,17 @@ function initNavWrapInteractive(scope) {
 
     mobileLinks.forEach(function (a) {
       a.addEventListener("click", function (e) {
-        e.preventDefault();
-        closeMenu();
+        var href = getMobileLinkUrl(a);
+        var isPlainClick = (!e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey && (e.button == null || e.button === 0));
+
+        if (href && isPlainClick && typeof barba !== "undefined" && barba.go) {
+          e.preventDefault();
+          if (barba.transitions && barba.transitions.isRunning) return;
+          barba.go(href);
+          return;
+        }
+
+        closeMenu({ immediate: true, restoreFocus: false });
       });
     });
 
