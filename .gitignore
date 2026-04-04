@@ -1,0 +1,4 @@
+.playwright-temp/
+artifacts/transition-study/
+playwright-transition-study.mjs
+transition-study.spec.js
