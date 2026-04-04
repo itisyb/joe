@@ -1,3 +1,4 @@
+// Version: 2026-04-04
 // -----------------------------------------
 // OSMO PAGE TRANSITION BOILERPLATE
 // -----------------------------------------
@@ -753,6 +754,13 @@ function markHeroPreloadPrimed(root, navPreload) {
 		navPreload.setAttribute("data-hero-preload-primed", "true");
 }
 
+function applyHeroHeadlineStableTypography(headline) {
+	if (!headline || !headline.style) return;
+	headline.style.fontKerning = "none";
+	headline.style.fontVariantLigatures = "none";
+	headline.style.setProperty("font-feature-settings", '"kern" 0');
+}
+
 function setHeroPreloadInitialHiddenState(headline, revealEls, navPreload) {
 	if (headline) {
 		headline.style.opacity = "0";
@@ -840,8 +848,10 @@ function resetHeroPreloadForRepeatBarbaVisit(container) {
 		overwrite: "auto",
 	});
 	if (video) gsap.set(video, { autoAlpha: 1, y: 0, overwrite: "auto" });
-	if (headline)
+	if (headline) {
+		applyHeroHeadlineStableTypography(headline);
 		gsap.set(headline, { autoAlpha: 1, opacity: 1, visibility: "inherit" });
+	}
 	if (navPreload) gsap.set(navPreload, { autoAlpha: 1 });
 	if (revealEls.length)
 		gsap.set(revealEls, { autoAlpha: 1, y: 0, yPercent: 0 });
@@ -875,23 +885,6 @@ function runHeroPreloader(container) {
 				var headline =
 					root.querySelector("[data-hero-preload-headline]") ||
 					root.querySelector("h1.hero_close_title");
-				var headlineFaceSave = null;
-
-				function restoreHeadlineTypography() {
-					if (!headline || !headlineFaceSave) return;
-					if (headlineFaceSave.kerning) headline.style.fontKerning = headlineFaceSave.kerning;
-					else headline.style.removeProperty("font-kerning");
-					if (headlineFaceSave.ligatures)
-						headline.style.fontVariantLigatures = headlineFaceSave.ligatures;
-					else headline.style.removeProperty("font-variant-ligatures");
-					if (headlineFaceSave.features)
-						headline.style.setProperty(
-							"font-feature-settings",
-							headlineFaceSave.features,
-						);
-					else headline.style.removeProperty("font-feature-settings");
-					headlineFaceSave = null;
-				}
 				var navTextTypeSave = [];
 				var video = root.querySelector("video");
 				var timecodeEl = root.querySelector("[data-hero-timecode]");
@@ -937,7 +930,6 @@ function runHeroPreloader(container) {
 						contentLiftEl.style.zIndex = contentLiftSave.zIndex;
 						contentLiftEl.style.position = contentLiftSave.position;
 					}
-					restoreHeadlineTypography();
 					gsap.set(cover, { autoAlpha: 0, pointerEvents: "none" });
 					_heroPreloadCompleted = true;
 					if (video) {
@@ -1001,18 +993,9 @@ function runHeroPreloader(container) {
 
 				var split = null;
 				if (headline && typeof SplitText !== "undefined") {
-					// Split spans break cross-glyph kerning and ligatures vs. one text run, so
-					// restore the original typography as soon as the split text collapses back.
-					headlineFaceSave = {
-						kerning: headline.style.getPropertyValue("font-kerning"),
-						ligatures: headline.style.getPropertyValue(
-							"font-variant-ligatures",
-						),
-						features: headline.style.getPropertyValue("font-feature-settings"),
-					};
-					headline.style.fontKerning = "none";
-					headline.style.fontVariantLigatures = "none";
-					headline.style.setProperty("font-feature-settings", '"kern" 0');
+					// SplitText wraps each glyph, so keep the headline on the same kerning model
+					// before and after revert to avoid the end-of-animation spacing snap.
+					applyHeroHeadlineStableTypography(headline);
 
 					split = new SplitText(headline, {
 						type: "chars",
@@ -1071,7 +1054,6 @@ function runHeroPreloader(container) {
 						}
 						split = null;
 						if (headline) {
-							restoreHeadlineTypography();
 							gsap.set(headline, { autoAlpha: 1, opacity: 1, visibility: "inherit" });
 						}
 					});
