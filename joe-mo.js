@@ -117,6 +117,7 @@ var _navDebugMenuObserver = null;
 var _navDebugDocumentListenerAttached = false;
 var _navMenuDomNavigationPending = false;
 var _lastTransitionLabelText = "";
+var _liveNavToggleRepairEl = null;
 
 function resetNavMenuPendingNavigation() {
 	_navMenuDomNavigationPending = false;
@@ -334,6 +335,11 @@ function closeNavMenuUnderTransition() {
 	if (!menu) return;
 	menu.classList.remove("is-active", "is-settled");
 	menu.setAttribute("aria-hidden", "true");
+	menu.style.display = "none";
+	menu.style.visibility = "hidden";
+	menu.style.opacity = "0";
+	menu.style.pointerEvents = "none";
+	menu.style.clipPath = "inset(50% 0%)";
 	var toggles = document.querySelectorAll(".nav_toggle_wrap");
 	toggles.forEach((toggle) => {
 		toggle.setAttribute("aria-expanded", "false");
@@ -348,6 +354,71 @@ function closeNavMenuUnderTransition() {
 	});
 }
 
+function resetLiveNavMenuClosedState() {
+	if (typeof document === "undefined") return;
+	var menu = document.getElementById("nav-menu");
+	var toggle = document.getElementById("nav-toggle");
+	var toggleText = document.getElementById("toggle-text");
+	if (!menu) return;
+	menu.classList.remove("is-active", "is-settled");
+	menu.setAttribute("aria-hidden", "true");
+	menu.style.removeProperty("display");
+	menu.style.removeProperty("visibility");
+	menu.style.removeProperty("opacity");
+	menu.style.removeProperty("pointer-events");
+	menu.style.clipPath = "inset(50% 0%)";
+	if (toggle) {
+		toggle.setAttribute("aria-expanded", "false");
+		toggle.setAttribute("aria-label", "Open menu");
+	}
+	if (toggleText) {
+		toggleText.textContent = "MENU";
+	}
+	navDebugLog("nav:live-reset-closed", {
+		menuState: getNavMenuDebugState(menu),
+	});
+}
+
+function attachLiveNavToggleRepair() {
+	if (typeof document === "undefined") return;
+	var toggle = document.getElementById("nav-toggle");
+	var menu = document.getElementById("nav-menu");
+	var toggleText = document.getElementById("toggle-text");
+	if (!toggle || !menu || toggle === _liveNavToggleRepairEl) return;
+	_liveNavToggleRepairEl = toggle;
+	toggle.addEventListener("click", () => {
+		var wasExpanded = toggle.getAttribute("aria-expanded") === "true";
+		requestAnimationFrame(() => {
+			var isExpanded = toggle.getAttribute("aria-expanded") === "true";
+			if (isExpanded === wasExpanded) {
+				isExpanded = !wasExpanded;
+				toggle.setAttribute("aria-expanded", isExpanded ? "true" : "false");
+				toggle.setAttribute(
+					"aria-label",
+					isExpanded ? "Close menu" : "Open menu",
+				);
+				if (toggleText) toggleText.textContent = isExpanded ? "CLOSE" : "MENU";
+				navDebugLog("nav:live-toggle-fallback", {
+					expanded: isExpanded,
+				});
+			}
+			menu.style.removeProperty("display");
+			menu.style.removeProperty("visibility");
+			menu.style.removeProperty("opacity");
+			menu.style.removeProperty("pointer-events");
+			menu.removeAttribute("aria-hidden");
+			menu.style.clipPath = isExpanded ? "inset(0% 0%)" : "inset(50% 0%)";
+			if (!isExpanded) {
+				menu.setAttribute("aria-hidden", "true");
+			}
+			navDebugLog("nav:live-toggle-sync", {
+				expanded: isExpanded,
+				menuState: getNavMenuDebugState(menu),
+			});
+		});
+	});
+}
+
 function resolveTransitionLabelText(transitionLabelText, preferredLabelText) {
 	if (!transitionLabelText) return preferredLabelText || _lastTransitionLabelText || "Hi there";
 	var nextText = preferredLabelText || transitionLabelText.textContent || _lastTransitionLabelText || "Hi there";
@@ -359,15 +430,39 @@ function resolveTransitionLabelText(transitionLabelText, preferredLabelText) {
 
 function primeTransitionLabel(transitionLabel) {
 	if (!transitionLabel) return;
-	transitionLabel.style.position = "absolute";
-	transitionLabel.style.top = "calc(env(safe-area-inset-top, 0px) + 1.5rem)";
-	transitionLabel.style.left = "0";
-	transitionLabel.style.right = "0";
-	transitionLabel.style.bottom = "auto";
 	transitionLabel.style.zIndex = "2";
 	transitionLabel.style.visibility = "visible";
 	transitionLabel.style.pointerEvents = "none";
+	transitionLabel.style.whiteSpace = "nowrap";
 	gsap.set(transitionLabel, { autoAlpha: 1 });
+}
+
+function primeTransitionLayer(transitionWrap, transitionPanel) {
+	if (transitionWrap) {
+		transitionWrap.style.position = "fixed";
+		transitionWrap.style.top = "0";
+		transitionWrap.style.left = "0";
+		transitionWrap.style.right = "0";
+		transitionWrap.style.bottom = "0";
+		transitionWrap.style.width = "100vw";
+		transitionWrap.style.height = "100vh";
+		transitionWrap.style.zIndex = "9999";
+		transitionWrap.style.visibility = "visible";
+		transitionWrap.style.pointerEvents = "none";
+	}
+	if (transitionPanel) {
+		transitionPanel.style.position = "absolute";
+		transitionPanel.style.top = "0";
+		transitionPanel.style.left = "0";
+		transitionPanel.style.right = "0";
+		transitionPanel.style.bottom = "0";
+		transitionPanel.style.width = "100%";
+		transitionPanel.style.height = "100%";
+		transitionPanel.style.overflow = "hidden";
+		transitionPanel.style.zIndex = "1";
+		transitionPanel.style.visibility = "visible";
+		transitionPanel.style.pointerEvents = "none";
+	}
 }
 
 function resetTransitionLabelStyles(transitionLabel) {
@@ -380,6 +475,38 @@ function resetTransitionLabelStyles(transitionLabel) {
 	transitionLabel.style.removeProperty("z-index");
 	transitionLabel.style.removeProperty("visibility");
 	transitionLabel.style.removeProperty("pointer-events");
+	transitionLabel.style.removeProperty("white-space");
+	transitionLabel.style.removeProperty("overflow");
+	transitionLabel.style.removeProperty("clip-path");
+}
+
+function resetTransitionLayerStyles(transitionWrap, transitionPanel) {
+	if (transitionWrap) {
+		transitionWrap.style.removeProperty("position");
+		transitionWrap.style.removeProperty("top");
+		transitionWrap.style.removeProperty("left");
+		transitionWrap.style.removeProperty("right");
+		transitionWrap.style.removeProperty("bottom");
+		transitionWrap.style.removeProperty("width");
+		transitionWrap.style.removeProperty("height");
+		transitionWrap.style.removeProperty("z-index");
+		transitionWrap.style.removeProperty("visibility");
+		transitionWrap.style.removeProperty("pointer-events");
+	}
+	if (transitionPanel) {
+		transitionPanel.style.removeProperty("position");
+		transitionPanel.style.removeProperty("top");
+		transitionPanel.style.removeProperty("left");
+		transitionPanel.style.removeProperty("right");
+		transitionPanel.style.removeProperty("bottom");
+		transitionPanel.style.removeProperty("width");
+		transitionPanel.style.removeProperty("height");
+		transitionPanel.style.removeProperty("overflow");
+		transitionPanel.style.removeProperty("clip-path");
+		transitionPanel.style.removeProperty("z-index");
+		transitionPanel.style.removeProperty("visibility");
+		transitionPanel.style.removeProperty("pointer-events");
+	}
 }
 
 // -----------------------------------------
@@ -388,6 +515,7 @@ function resetTransitionLabelStyles(transitionLabel) {
 
 function initOnceFunctions() {
 	attachNavMenuDebugObserver();
+	attachLiveNavToggleRepair();
 	initLenis();
 	if (onceFunctionsInitialized) return;
 	onceFunctionsInitialized = true;
@@ -1101,8 +1229,8 @@ function consumeArmedTransitionScreen(transitionWrap) {
 }
 
 function runPageLeaveAnimation(current, next) {
-	var coverDuration = 0.55;
-	var labelDelay = 0.08;
+	var coverDuration = slowSec(0.35);
+	var labelDelay = slowSec(0.2);
 	var nextPageName =
 		next && next.getAttribute ? next.getAttribute("data-page-name") : null;
 	var nextNamespace =
@@ -1120,11 +1248,12 @@ function runPageLeaveAnimation(current, next) {
 		"[data-transition-label-text]",
 	);
 	const transitionWasArmed = consumeArmedTransitionScreen(transitionWrap);
- 	var resolvedLabelText = resolveTransitionLabelText(
+	var resolvedLabelText = resolveTransitionLabelText(
 		transitionLabelText,
 		nextPageName,
 	);
- 	primeTransitionLabel(transitionLabel);
+	primeTransitionLayer(transitionWrap, transitionPanel);
+	primeTransitionLabel(transitionLabel);
 
 	gsap.killTweensOf([transitionPanel, transitionLabel]);
 	navDebugLog("barba:leave:start", {
@@ -1151,7 +1280,7 @@ function runPageLeaveAnimation(current, next) {
 		navDebugLog("barba:leave:timeline-start", {
 			transitionPanel: {
 				autoAlpha: 1,
-				yPercent: 100,
+				yPercent: 0,
 			},
 		});
 	}, null, 0);
@@ -1160,7 +1289,8 @@ function runPageLeaveAnimation(current, next) {
 		transitionPanel,
 		{
 			autoAlpha: 1,
-			yPercent: 100,
+			yPercent: 0,
+			clipPath: "inset(0% 0% 0% 0%)",
 		},
 		0,
 	);
@@ -1169,20 +1299,7 @@ function runPageLeaveAnimation(current, next) {
 		transitionLabel,
 		{
 			autoAlpha: 1,
-		},
-		0,
-	);
-
-	tl.fromTo(
-		transitionPanel,
-		{
-			yPercent: 100,
-		},
-		{
-			yPercent: 0,
-			duration: coverDuration,
-			overwrite: "auto",
-			immediateRender: false,
+			clipPath: "inset(0% 0% 0% 0%)",
 		},
 		0,
 	);
@@ -1190,7 +1307,7 @@ function runPageLeaveAnimation(current, next) {
 	tl.call(() => {
 		navDebugLog("barba:leave:covered");
 		closeNavMenuUnderTransition();
-	}, null, coverDuration);
+	}, null, 0);
 
 	if (!transitionWasArmed) {
 		tl.set(transitionLabel, { autoAlpha: 0 }, 0);
@@ -1206,13 +1323,15 @@ function runPageLeaveAnimation(current, next) {
 		);
 	}
 
+	tl.to({}, { duration: coverDuration });
+
 }
 
 function runPageEnterAnimation(next) {
-	var revealStartDelay = 0;
-	var revealDuration = 0.75;
-	var labelFadeDuration = 0.2;
-	var labelFadeStart = 0.45;
+	var revealStartDelay = slowSec(0.2);
+	var revealDuration = slowSec(1.2);
+	var labelFadeDuration = slowSec(0.5);
+	var labelFadeStart = slowSec(0.15);
 	const transitionWrap = document.querySelector("[data-transition-wrap]");
 	const transitionPanel = transitionWrap.querySelector(
 		"[data-transition-panel]",
@@ -1223,8 +1342,9 @@ function runPageEnterAnimation(next) {
 	const transitionLabelText = transitionWrap.querySelector(
 		"[data-transition-label-text]",
 	);
- 	var resolvedLabelText = resolveTransitionLabelText(transitionLabelText);
- 	primeTransitionLabel(transitionLabel);
+	var resolvedLabelText = resolveTransitionLabelText(transitionLabelText);
+	primeTransitionLayer(transitionWrap, transitionPanel);
+	primeTransitionLabel(transitionLabel);
 
 	const tl = gsap.timeline();
 	navDebugLog("barba:enter:start", {
@@ -1259,10 +1379,10 @@ function runPageEnterAnimation(next) {
 	tl.fromTo(
 		transitionPanel,
 		{
-			yPercent: 0,
+			clipPath: "inset(0% 0% 0% 0%)",
 		},
 		{
-			yPercent: -100,
+			clipPath: "inset(0% 0% 100% 0%)",
 			duration: revealDuration,
 			overwrite: "auto",
 			immediateRender: false,
@@ -1292,19 +1412,11 @@ function runPageEnterAnimation(next) {
 		"startEnter+=" + labelFadeStart,
 	);
 
-	tl.from(
-		next,
-		{
-			y: "15vh",
-			duration: revealDuration,
-		},
-		"startEnter",
-	);
-
 	tl.add("pageReady");
 	tl.call(() => {
 		navDebugLog("barba:enter:page-ready");
 		resetTransitionLabelStyles(transitionLabel);
+		resetTransitionLayerStyles(transitionWrap, transitionPanel);
 	}, null, "pageReady");
 	tl.call(resetPage, [next], "pageReady");
 	return new Promise((resolve) => {
@@ -1322,15 +1434,19 @@ function runPageEnterAnimation(next) {
 // -----------------------------------------
 
 barba.hooks.beforeEnter((data) => {
+	var isRealPageTransition = !!(data.current && data.current.container);
 	attachNavMenuDebugObserver();
 	navDebugLog("barba:hook:beforeEnter", {
 		nextNamespace: data.next.container.getAttribute("data-barba-namespace") || null,
+		isRealPageTransition: isRealPageTransition,
 	});
 	gsap.set(data.next.container, {
 		position: "fixed",
 		top: 0,
 		left: 0,
 		right: 0,
+		autoAlpha: isRealPageTransition ? 0 : 1,
+		pointerEvents: isRealPageTransition ? "none" : "auto",
 	});
 
 	if (lenis && typeof lenis.stop === "function") {
@@ -1358,6 +1474,7 @@ barba.hooks.enter((data) => {
 
 barba.hooks.afterEnter((data) => {
 	attachNavMenuDebugObserver();
+	attachLiveNavToggleRepair();
 	navDebugLog("barba:hook:afterEnter", {
 		nextNamespace: data.next.container.getAttribute("data-barba-namespace") || null,
 	});
@@ -1945,6 +2062,7 @@ function initLenis() {
 
 function resetPage(container) {
 	window.scrollTo(0, 0);
+	resetLiveNavMenuClosedState();
 	gsap.set(container, {
 		clearProps: "position,top,left,right,transform,opacity,visibility,pointerEvents",
 	});
@@ -2301,6 +2419,11 @@ function initNavWrapInteractive(scope) {
 
 		menu.classList.remove("is-preview", "is-active", "is-settled");
 		menu.setAttribute("aria-hidden", "true");
+		menu.style.display = "";
+		menu.style.visibility = "";
+		menu.style.opacity = "";
+		menu.style.pointerEvents = "";
+		menu.style.clipPath = "";
 		if (wordmark) wordmark.style.opacity = "0";
 		mobileLinks.forEach((a) => {
 			a.setAttribute("tabindex", "-1");
