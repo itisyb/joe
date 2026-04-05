@@ -68,6 +68,25 @@
 	else document.addEventListener("DOMContentLoaded", inject);
 })();
 
+// Incoming Barba pages: hide load-animation targets until their JS init has prepared
+// the pre-animation state, so the revealed page doesn't show a static snapshot first.
+(function injectBarbaEnterPendingStyleOnce() {
+	if (typeof document === "undefined") return;
+	function inject() {
+		if (document.getElementById("jjn-barba-enter-pending")) return;
+		var st = document.createElement("style");
+		st.id = "jjn-barba-enter-pending";
+		st.textContent =
+			'[data-barba-enter-pending="true"] [data-anim-glitch],' +
+			'[data-barba-enter-pending="true"] [data-scramble="load"]{opacity:0!important;visibility:hidden!important}';
+		var h = document.head || document.getElementsByTagName("head")[0];
+		if (h) h.appendChild(st);
+		else document.documentElement.appendChild(st);
+	}
+	if (document.head || document.getElementsByTagName("head")[0]) inject();
+	else document.addEventListener("DOMContentLoaded", inject);
+})();
+
 gsap.registerPlugin(CustomEase);
 if (typeof ScrollTrigger !== "undefined") gsap.registerPlugin(ScrollTrigger);
 if (typeof SplitText !== "undefined") gsap.registerPlugin(SplitText);
@@ -667,11 +686,7 @@ function initBeforeEnterFunctions(next) {
 
 function initAfterEnterFunctions(next) {
 	nextPage = next || document;
-
-	// Runs after enter animation completes
-	if (has("[data-typo-scroll-init]")) initTypoScrollPreview();
-	if (has("[data-scroll-overlap='trigger']")) initScrollOverlap();
-	_fontsReady.then(() => {
+	var asyncInit = _fontsReady.then(() => {
 		if (has("[data-anim-glitch]")) initAnimGlitch(nextPage);
 		if (
 			has("[data-scramble='load']") ||
@@ -681,6 +696,10 @@ function initAfterEnterFunctions(next) {
 			initScrambleAll(nextPage);
 		}
 	});
+
+	// Runs after enter animation completes
+	if (has("[data-typo-scroll-init]")) initTypoScrollPreview();
+	if (has("[data-scroll-overlap='trigger']")) initScrollOverlap();
 	if (has(".about_contain")) {
 		requestAnimationFrame(() => {
 			requestAnimationFrame(() => {
@@ -722,6 +741,8 @@ function initAfterEnterFunctions(next) {
 	if (hasScrollTrigger) {
 		ScrollTrigger.refresh();
 	}
+
+	return asyncInit;
 }
 
 // -----------------------------------------
@@ -746,6 +767,16 @@ function initAfterEnterFunctions(next) {
 // -----------------------------------------
 
 var _heroPreloadCompleted = false;
+
+function markBarbaEnterAnimationPending(container) {
+	if (!container || !container.setAttribute) return;
+	container.setAttribute("data-barba-enter-pending", "true");
+}
+
+function clearBarbaEnterAnimationPending(container) {
+	if (!container || !container.removeAttribute) return;
+	container.removeAttribute("data-barba-enter-pending");
+}
 
 function markHeroPreloadPrimed(root, navPreload) {
 	if (root && root.setAttribute)
@@ -1464,6 +1495,9 @@ barba.hooks.beforeEnter((data) => {
 		nextNamespace: data.next.container.getAttribute("data-barba-namespace") || null,
 		isRealPageTransition: isRealPageTransition,
 	});
+	if (isRealPageTransition) {
+		markBarbaEnterAnimationPending(data.next.container);
+	}
 	gsap.set(data.next.container, {
 		position: "fixed",
 		top: 0,
@@ -1503,7 +1537,14 @@ barba.hooks.afterEnter((data) => {
 		nextNamespace: data.next.container.getAttribute("data-barba-namespace") || null,
 	});
 	resetNavMenuPendingNavigation();
-	initAfterEnterFunctions(data.next.container);
+	Promise.resolve(initAfterEnterFunctions(data.next.container)).then(() => {
+		requestAnimationFrame(() => {
+			clearBarbaEnterAnimationPending(data.next.container);
+			if (hasScrollTrigger) {
+				ScrollTrigger.refresh();
+			}
+		});
+	});
 
 	if (hasLenis) {
 		lenis.resize();
