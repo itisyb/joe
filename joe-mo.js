@@ -1,4 +1,4 @@
-// Version: 2026-04-04
+// Version: 2026-04-05
 // -----------------------------------------
 // OSMO PAGE TRANSITION BOILERPLATE
 // -----------------------------------------
@@ -1187,6 +1187,9 @@ function runPageOnceAnimation(next) {
 function armTransitionScreen(labelText) {
 	var transitionWrap = document.querySelector("[data-transition-wrap]");
 	if (!transitionWrap) return false;
+	var transitionPanel = transitionWrap.querySelector("[data-transition-panel]");
+	var transitionLabel = transitionWrap.querySelector("[data-transition-label]");
+	var coverStartClip = "inset(100% 0% 0% 0%)";
 
 	var transitionLabelText = transitionWrap.querySelector(
 		"[data-transition-label-text]",
@@ -1194,6 +1197,21 @@ function armTransitionScreen(labelText) {
 	if (!transitionLabelText) return false;
 
 	resolveTransitionLabelText(transitionLabelText, labelText);
+	primeTransitionLayer(transitionWrap, transitionPanel);
+	primeTransitionLabel(transitionLabel);
+	gsap.killTweensOf([transitionPanel, transitionLabel]);
+	if (transitionPanel) {
+		gsap.set(transitionPanel, {
+			autoAlpha: 1,
+			yPercent: 0,
+			clipPath: coverStartClip,
+		});
+	}
+	if (transitionLabel) {
+		gsap.set(transitionLabel, {
+			autoAlpha: 1,
+		});
+	}
 	transitionWrap.setAttribute("data-transition-armed", "true");
 	navDebugLog("transition:armed", {
 		labelText: transitionLabelText.textContent || null,
@@ -1213,6 +1231,9 @@ function consumeArmedTransitionScreen(transitionWrap) {
 function runPageLeaveAnimation(current, next) {
 	var coverDuration = slowSec(0.35);
 	var labelDelay = slowSec(0.2);
+	var coverStartClip = "inset(100% 0% 0% 0%)";
+	var coverEndClip = "inset(0% 0% 0% 0%)";
+	var coverInEase = "power3.in";
 	var nextPageName =
 		next && next.getAttribute ? next.getAttribute("data-page-name") : null;
 	var nextNamespace =
@@ -1255,7 +1276,10 @@ function runPageLeaveAnimation(current, next) {
 
 	if (reducedMotion) {
 		navDebugLog("barba:leave:reduced-motion");
-		return tl.set(current, { autoAlpha: 0 });
+		tl.set(current, { autoAlpha: 0 });
+		return new Promise((resolve) => {
+			tl.call(resolve, null, ">");
+		});
 	}
 
 	tl.call(() => {
@@ -1272,7 +1296,7 @@ function runPageLeaveAnimation(current, next) {
 		{
 			autoAlpha: 1,
 			yPercent: 0,
-			clipPath: "inset(0% 0% 0% 0%)",
+			clipPath: coverStartClip,
 		},
 		0,
 	);
@@ -1281,7 +1305,18 @@ function runPageLeaveAnimation(current, next) {
 		transitionLabel,
 		{
 			autoAlpha: 1,
-			clipPath: "inset(0% 0% 0% 0%)",
+		},
+		0,
+	);
+
+	tl.to(
+		transitionPanel,
+		{
+			clipPath: coverEndClip,
+			duration: coverDuration,
+			ease: coverInEase,
+			overwrite: "auto",
+			immediateRender: false,
 		},
 		0,
 	);
@@ -1289,7 +1324,7 @@ function runPageLeaveAnimation(current, next) {
 	tl.call(() => {
 		navDebugLog("barba:leave:covered");
 		closeNavMenuUnderTransition();
-	}, null, 0);
+	}, null, coverDuration);
 
 	if (!transitionWasArmed) {
 		tl.set(transitionLabel, { autoAlpha: 0 }, 0);
@@ -1307,6 +1342,9 @@ function runPageLeaveAnimation(current, next) {
 
 	tl.to({}, { duration: coverDuration });
 
+	return new Promise((resolve) => {
+		tl.call(resolve, null, ">");
+	});
 }
 
 function runPageEnterAnimation(next) {
@@ -1314,6 +1352,8 @@ function runPageEnterAnimation(next) {
 	var revealDuration = slowSec(1.2);
 	var labelFadeDuration = slowSec(0.5);
 	var labelFadeStart = slowSec(0.15);
+	var coverOutEase = "power3.out";
+	var afterRevealSettleDelay = slowSec(0.12);
 	const transitionWrap = document.querySelector("[data-transition-wrap]");
 	const transitionPanel = transitionWrap.querySelector(
 		"[data-transition-panel]",
@@ -1366,6 +1406,7 @@ function runPageEnterAnimation(next) {
 		{
 			clipPath: "inset(0% 0% 100% 0%)",
 			duration: revealDuration,
+			ease: coverOutEase,
 			overwrite: "auto",
 			immediateRender: false,
 		},
@@ -1401,13 +1442,14 @@ function runPageEnterAnimation(next) {
 		resetTransitionLayerStyles(transitionWrap, transitionPanel);
 	}, null, "pageReady");
 	tl.call(resetPage, [next], "pageReady");
+	tl.to({}, { duration: afterRevealSettleDelay });
 	return new Promise((resolve) => {
 		tl.call(() => {
 			endNavDebugSession("barba:enter:complete", {
 				nextNamespace: next.getAttribute("data-barba-namespace") || null,
 			});
 			resolve();
-		}, null, "pageReady");
+		}, null, ">");
 	});
 }
 
