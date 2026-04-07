@@ -55,7 +55,7 @@
 		var st = document.createElement("style");
 		st.id = "jjn-hero-preload-fouc";
 		st.textContent =
-			"body:has([data-hero-preload-root]) [data-hero-preload-nav]:not([data-hero-preload-primed]){opacity:0!important;visibility:hidden!important;pointer-events:none!important}" +
+			"body:has([data-hero-preload-root]) [data-hero-preload-nav]:not([data-hero-preload-primed]),body:has([data-hero-preload-root]) #main-nav:not([data-hero-preload-primed]),body:has([data-hero-preload-root]) nav.navjn_wrap:not([data-hero-preload-primed]){opacity:0!important;visibility:hidden!important;pointer-events:none!important}" +
 			"[data-hero-preload-root]:not([data-hero-preload-primed]) [data-hero-preload-headline]," +
 			"[data-hero-preload-root]:not([data-hero-preload-primed]) .hero_close_title," +
 			"[data-hero-preload-root]:not([data-hero-preload-primed]) [data-hero-timecode]," +
@@ -891,6 +891,19 @@ function scheduleHeroTimecodeAfterPreload(scope) {
 	tryStart();
 }
 
+function getHeroPreloadNav(container) {
+	var scope = container && container.querySelector ? container : document;
+	var nav = scope.querySelector("[data-hero-preload-nav]");
+	if (nav) return nav;
+	nav = document.querySelector("[data-hero-preload-nav]");
+	if (nav) return nav;
+	if (scope !== document) {
+		nav = scope.querySelector("#main-nav") || scope.querySelector("nav.navjn_wrap");
+		if (nav) return nav;
+	}
+	return document.querySelector("#main-nav") || document.querySelector("nav.navjn_wrap");
+}
+
 // After the first visit, runHeroPreloader only runs in barba `once`; incoming Home HTML
 // still has the black cover visible — hide it and match the post-preload hero state.
 function resetHeroPreloadForRepeatBarbaVisit(container) {
@@ -903,9 +916,7 @@ function resetHeroPreloadForRepeatBarbaVisit(container) {
 	var headline =
 		root.querySelector("[data-hero-preload-headline]") ||
 		root.querySelector("h1.hero_close_title");
-	var navPreload = container.querySelector("[data-hero-preload-nav]");
-	if (!navPreload)
-		navPreload = document.querySelector("[data-hero-preload-nav]");
+	var navPreload = getHeroPreloadNav(container);
 
 	var revealEls = [];
 	var te = root.querySelector("[data-hero-timecode]");
@@ -945,7 +956,8 @@ function resetHeroPreloadForRepeatBarbaVisit(container) {
 		applyHeroHeadlineStableTypography(headline);
 		gsap.set(headline, { autoAlpha: 1, opacity: 1, visibility: "inherit" });
 	}
-	if (navPreload) gsap.set(navPreload, { autoAlpha: 1 });
+	if (navPreload)
+		gsap.set(navPreload, { autoAlpha: 1, y: 0, clearProps: "transform" });
 	if (revealEls.length)
 		gsap.set(revealEls, { autoAlpha: 1, y: 0, yPercent: 0 });
 
@@ -966,9 +978,7 @@ function runHeroPreloader(container) {
 				var root = container.querySelector("[data-hero-preload-root]");
 				var cover = root && root.querySelector("[data-hero-preload-cover]");
 				if (!root || !cover) {
-					var navFallback = container.querySelector("[data-hero-preload-nav]");
-					if (!navFallback)
-						navFallback = document.querySelector("[data-hero-preload-nav]");
+					var navFallback = getHeroPreloadNav(container);
 					markHeroPreloadPrimed(root, navFallback);
 					_heroPreloadCompleted = true;
 					resolve();
@@ -1003,16 +1013,15 @@ function runHeroPreloader(container) {
 					);
 				}
 
-				var navPreload = container.querySelector("[data-hero-preload-nav]");
-				if (!navPreload)
-					navPreload = document.querySelector("[data-hero-preload-nav]");
+				var navPreload = getHeroPreloadNav(container);
+				var navTextEls = navPreload
+					? Array.from(navPreload.querySelectorAll("[data-hero-preload-nav-text]"))
+					: [];
+				var animateWholeNav = !!(navPreload && !navTextEls.length);
 				if (navPreload) {
-					Array.prototype.forEach.call(
-						navPreload.querySelectorAll("[data-hero-preload-nav-text]"),
-						(el) => {
-							subPushUnique(el);
-						},
-					);
+					navTextEls.forEach((el) => {
+						subPushUnique(el);
+					});
 				}
 
 				setHeroPreloadInitialHiddenState(headline, subArr, navPreload);
@@ -1052,7 +1061,8 @@ function runHeroPreloader(container) {
 					if (video) gsap.set(video, { autoAlpha: 1, y: 0 });
 					gsap.set(subArr, { autoAlpha: 1 });
 					if (headline) gsap.set(headline, { autoAlpha: 1 });
-					if (navPreload) gsap.set(navPreload, { autoAlpha: 1 });
+					if (navPreload)
+						gsap.set(navPreload, { autoAlpha: 1, y: 0, clearProps: "transform" });
 					finish();
 					return;
 				}
@@ -1063,6 +1073,8 @@ function runHeroPreloader(container) {
 				var afterHeadlineDelay = useCompactPreload ? 0.08 : 0.2;
 				var wipeDuration = useCompactPreload ? 0.72 : 1;
 				var afterWipeDelay = useCompactPreload ? 0.06 : 0.15;
+				var navRevealDuration = useCompactPreload ? 0.25 : 0.42;
+				var navRevealY = useCompactPreload ? "-0.45rem" : "-0.75rem";
 				var sublineStagger = useCompactPreload ? 0.05 : 0.1;
 				var sublineScrambleDuration = useCompactPreload ? 0.55 : 1.1;
 				var sublineRevealDuration = useCompactPreload ? 0.2 : 0.35;
@@ -1075,23 +1087,25 @@ function runHeroPreloader(container) {
 					yPercent: 0,
 					transformOrigin: "50% 50% 0",
 				});
-				if (navPreload) gsap.set(navPreload, { autoAlpha: 0 });
+				if (navPreload) {
+					gsap.set(navPreload, {
+						autoAlpha: 0,
+						y: animateWholeNav ? navRevealY : 0,
+					});
+				}
 
 				if (navPreload) {
-					Array.prototype.forEach.call(
-						navPreload.querySelectorAll("[data-hero-preload-nav-text]"),
-						(el) => {
-							navTextTypeSave.push({
-								el: el,
-								kerning: el.style.getPropertyValue("font-kerning"),
-								ligatures: el.style.getPropertyValue("font-variant-ligatures"),
-								features: el.style.getPropertyValue("font-feature-settings"),
-							});
-							el.style.fontKerning = "none";
-							el.style.fontVariantLigatures = "none";
-							el.style.setProperty("font-feature-settings", '"kern" 0');
-						},
-					);
+					navTextEls.forEach((el) => {
+						navTextTypeSave.push({
+							el: el,
+							kerning: el.style.getPropertyValue("font-kerning"),
+							ligatures: el.style.getPropertyValue("font-variant-ligatures"),
+							features: el.style.getPropertyValue("font-feature-settings"),
+						});
+						el.style.fontKerning = "none";
+						el.style.fontVariantLigatures = "none";
+						el.style.setProperty("font-feature-settings", '"kern" 0');
+					});
 				}
 
 				var split = null;
@@ -1195,7 +1209,21 @@ function runHeroPreloader(container) {
 				tl.add("afterWipe", ">+=" + afterWipeDelay);
 
 				if (navPreload) {
-					tl.set(navPreload, { autoAlpha: 1 }, "afterWipe");
+					if (animateWholeNav) {
+						tl.to(
+							navPreload,
+							{
+								autoAlpha: 1,
+								y: 0,
+								duration: navRevealDuration,
+								ease: "power2.out",
+								clearProps: "transform",
+							},
+							"afterWipe",
+						);
+					} else {
+						tl.set(navPreload, { autoAlpha: 1 }, "afterWipe");
+					}
 				}
 
 				function restoreNavTextTypography(line) {
