@@ -93,6 +93,7 @@ if (typeof SplitText !== "undefined") gsap.registerPlugin(SplitText);
 if (typeof ScrambleTextPlugin !== "undefined")
 	gsap.registerPlugin(ScrambleTextPlugin);
 if (typeof Draggable !== "undefined") gsap.registerPlugin(Draggable);
+if (typeof Flip !== "undefined") gsap.registerPlugin(Flip);
 function ensureFlipPluginRegistered() {
 	var F = typeof window !== "undefined" ? window.Flip : undefined;
 	if (typeof F === "undefined" || typeof gsap === "undefined") return false;
@@ -118,6 +119,12 @@ let reducedMotion = rmMQ.matches;
 rmMQ.addEventListener?.("change", (e) => (reducedMotion = e.matches));
 rmMQ.addListener?.((e) => (reducedMotion = e.matches));
 
+function shouldUseCompactHeroPreload() {
+	if (typeof window === "undefined" || typeof window.matchMedia !== "function")
+		return false;
+	return window.matchMedia("(hover: none), (pointer: coarse)").matches;
+}
+
 const has = (s) => !!nextPage.querySelector(s);
 
 const staggerDefault = 0.05;
@@ -126,7 +133,39 @@ const durationDefault = 0.6;
 CustomEase.create("osmo", "0.625, 0.05, 0, 1");
 gsap.defaults({ ease: "osmo", duration: durationDefault });
 
-var _fontsReady = document.fonts ? document.fonts.ready : Promise.resolve();
+function waitForDocumentFonts() {
+	if (
+		typeof document === "undefined" ||
+		!document.fonts ||
+		document.fonts.status === "loaded"
+	) {
+		return Promise.resolve();
+	}
+	return new Promise((resolve) => {
+		var settled = false;
+		function finish() {
+			if (settled) return;
+			settled = true;
+			resolve();
+		}
+		function pollStatus() {
+			if (document.fonts.status === "loaded") {
+				finish();
+				return;
+			}
+			requestAnimationFrame(pollStatus);
+		}
+		if (
+			document.fonts.ready &&
+			typeof document.fonts.ready.then === "function"
+		) {
+			document.fonts.ready.then(finish).catch(() => {});
+		}
+		pollStatus();
+	});
+}
+
+var _fontsReady = waitForDocumentFonts();
 var _resetNavMenuPendingNavigation = null;
 const NAV_DEBUG_ENABLED = true;
 const NAV_DEBUG_SLOWMO = 1;
@@ -567,6 +606,12 @@ function initOnceFunctions() {
 		initMarqueeScrollDirection(document);
 	initWorkViewToggle();
 	initFolioFlipViewToggle();
+	if (
+		document.querySelector("[data-portfolio-toggle]") ||
+		document.querySelector("[data-masonry-list]")
+	) {
+		initPortfolioPageFeatures(document);
+	}
 	if (document.querySelector("[data-media-init]")) initMediaSetup();
 	initCustomCursor();
 	if (document.querySelector(".minimap_wrap")) initMinimapWrap(document);
@@ -672,6 +717,17 @@ function initBeforeEnterFunctions(next) {
 		}
 	}
 
+	// Portfolio-Bild-Lightbox (Flip): schließen, bevor der alte Container weg ist
+	var activePortfolioLightbox = document.querySelector(
+		'[data-lightbox="wrapper"].is-active',
+	);
+	if (activePortfolioLightbox) {
+		var plClose = activePortfolioLightbox.querySelector(
+			'[data-lightbox="close"]',
+		);
+		if (plClose) plClose.click();
+	}
+
 	if (_heroPreloadCompleted && next && next.querySelector) {
 		resetHeroPreloadForRepeatBarbaVisit(next);
 	}
@@ -728,6 +784,12 @@ function initAfterEnterFunctions(next) {
 	if (has(".faq_cms_wrap")) initFaqAccordion(nextPage);
 	if (has("[data-marquee-scroll-direction-target]"))
 		initMarqueeScrollDirection(nextPage);
+	if (
+		has("[data-portfolio-toggle]") ||
+		has("[data-masonry-list]")
+	) {
+		initPortfolioPageFeatures(nextPage);
+	}
 	if (has("[data-media-init]")) initMediaSetup();
 	initCustomCursor();
 	if (has(".minimap_wrap")) initMinimapWrap(nextPage);
@@ -995,6 +1057,16 @@ function runHeroPreloader(container) {
 					return;
 				}
 
+				var useCompactPreload = shouldUseCompactHeroPreload();
+				var introHoldDuration = useCompactPreload ? 0.12 : 0.35;
+				var headlineFadeDuration = useCompactPreload ? 0.32 : 0.55;
+				var afterHeadlineDelay = useCompactPreload ? 0.08 : 0.2;
+				var wipeDuration = useCompactPreload ? 0.72 : 1;
+				var afterWipeDelay = useCompactPreload ? 0.06 : 0.15;
+				var sublineStagger = useCompactPreload ? 0.05 : 0.1;
+				var sublineScrambleDuration = useCompactPreload ? 0.55 : 1.1;
+				var sublineRevealDuration = useCompactPreload ? 0.2 : 0.35;
+
 				gsap.set(cover, { autoAlpha: 1, yPercent: 0 });
 				if (video) gsap.set(video, { autoAlpha: 0, y: "15vh" });
 				gsap.set(subArr, {
@@ -1023,7 +1095,11 @@ function runHeroPreloader(container) {
 				}
 
 				var split = null;
-				if (headline && typeof SplitText !== "undefined") {
+				if (
+					headline &&
+					typeof SplitText !== "undefined" &&
+					!useCompactPreload
+				) {
 					// SplitText wraps each glyph, so keep the headline on the same kerning model
 					// before and after revert to avoid the end-of-animation spacing snap.
 					applyHeroHeadlineStableTypography(headline);
@@ -1050,7 +1126,7 @@ function runHeroPreloader(container) {
 
 				var tl = gsap.timeline({ onComplete: finish });
 
-				tl.to({}, { duration: 0.35 });
+				tl.to({}, { duration: introHoldDuration });
 
 				if (split && split.chars.length) {
 					var glitchTl = gsap.timeline();
@@ -1092,31 +1168,31 @@ function runHeroPreloader(container) {
 					tl.fromTo(
 						headline,
 						{ autoAlpha: 0 },
-						{ autoAlpha: 1, duration: 0.55 },
+						{ autoAlpha: 1, duration: headlineFadeDuration },
 						">",
 					);
 				}
 
-				tl.add("afterHeadline", ">+=0.2");
+				tl.add("afterHeadline", ">+=" + afterHeadlineDelay);
 
-				tl.add("wipe", "afterHeadline+=0.2");
+				tl.add("wipe", "afterHeadline+=" + afterHeadlineDelay);
 				if (video) {
 					tl.set(video, { autoAlpha: 1 }, "wipe");
-					tl.to(video, { y: 0, duration: 1, ease: "osmo" }, "wipe");
+					tl.to(video, { y: 0, duration: wipeDuration, ease: "osmo" }, "wipe");
 				}
 				tl.fromTo(
 					cover,
 					{ yPercent: 0 },
 					{
 						yPercent: -100,
-						duration: 1,
+						duration: wipeDuration,
 						overwrite: "auto",
 						immediateRender: false,
 					},
 					"wipe",
 				);
 
-				tl.add("afterWipe", ">+=0.15");
+				tl.add("afterWipe", ">+=" + afterWipeDelay);
 
 				if (navPreload) {
 					tl.set(navPreload, { autoAlpha: 1 }, "afterWipe");
@@ -1138,18 +1214,19 @@ function runHeroPreloader(container) {
 				}
 
 				if (
+					!useCompactPreload &&
 					scramblePluginsReady() &&
 					subArr.length &&
 					typeof ScrambleTextPlugin !== "undefined"
 				) {
 					subArr.forEach((line, i) => {
 						var txt = storedSubTexts[i] || "";
-						var pos = "afterWipe+=" + i * 0.1;
+						var pos = "afterWipe+=" + i * sublineStagger;
 						tl.set(line, { autoAlpha: 1, y: 0, yPercent: 0 }, pos);
 						tl.to(
 							line,
 							{
-								duration: 1.1,
+								duration: sublineScrambleDuration,
 								y: 0,
 								yPercent: 0,
 								overwrite: "auto",
@@ -1173,14 +1250,14 @@ function runHeroPreloader(container) {
 				} else {
 					subArr.forEach((line, i) => {
 						var txt = storedSubTexts[i] || "";
-						var pos = "afterWipe+=" + i * 0.1;
+						var pos = "afterWipe+=" + i * sublineStagger;
 						tl.set(line, { textContent: txt, y: 0, yPercent: 0 }, pos);
 						tl.fromTo(
 							line,
 							{ autoAlpha: 0, y: 0 },
 							{
 								autoAlpha: 1,
-								duration: 0.35,
+								duration: sublineRevealDuration,
 								y: 0,
 								onComplete: () => {
 									if (
@@ -1515,12 +1592,24 @@ barba.hooks.beforeEnter((data) => {
 	applyThemeFrom(data.next.container);
 });
 
-barba.hooks.afterLeave(() => {
+barba.hooks.afterLeave((data) => {
 	navDebugLog("barba:hook:afterLeave");
 	if (hasScrollTrigger) {
 		ScrollTrigger.getAll().forEach((trigger) => trigger.kill());
 	}
 	teardownDetachedMinimapInstances();
+	if (data && data.current && data.current.container) {
+		data.current.container
+			.querySelectorAll("[data-masonry-list]")
+			.forEach(function (list) {
+				if (list._masonry && typeof list._masonry.destroy === "function") {
+					try {
+						list._masonry.destroy();
+					} catch (_) {}
+				}
+				delete list.dataset.masonryJsInit;
+			});
+	}
 });
 
 barba.hooks.enter((data) => {
@@ -4161,6 +4250,594 @@ function typoScrollUpdateActive() {
 	});
 }
 
+// Bunny-Player-Chrome: Label/Titel aus dem Trigger (Video- + Portfolio-Lightbox).
+// Markup: unter .bunny-lightbox-player__desc im Player (yash_latest updatePlayerMeta).
+// Wichtig: nicht document.querySelector('[data-bunny-lightbox-init]') — es kann ein zweites,
+// verstecktes Player-Duplikat im Barba-Container VOR dem Body-Wrapper im DOM stehen.
+// Attribute: data-bunny-lightbox-* oder data-lightbox-* (Webflow/CMS).
+function resolveBunnyLightboxPlayerEl(explicitPlayer) {
+	if (explicitPlayer && explicitPlayer.nodeType === 1) return explicitPlayer;
+	var onBody = document.querySelector(
+		"body > [data-bunny-lightbox-status] [data-bunny-lightbox-init]",
+	);
+	if (onBody) return onBody;
+	return document.querySelector("[data-bunny-lightbox-init]");
+}
+
+function updateBunnyLightboxPlayMetaFromButton(btn, explicitPlayer) {
+	if (!btn) return;
+	var label =
+		btn.getAttribute("data-bunny-lightbox-label") ||
+		btn.getAttribute("data-lightbox-label") ||
+		"";
+	var title =
+		btn.getAttribute("data-bunny-lightbox-title") ||
+		btn.getAttribute("data-lightbox-title") ||
+		"";
+
+	var playerEl = resolveBunnyLightboxPlayerEl(explicitPlayer);
+	if (!playerEl) {
+		console.warn("[LB META] no [data-bunny-lightbox-init] player found");
+		return;
+	}
+
+	var desc = playerEl.querySelector(".bunny-lightbox-player__desc");
+	// Explizite Hooks am Player (falls Webflow andere Klassen exportiert)
+	var elSmall =
+		playerEl.querySelector("[data-bunny-lightbox-meta-label]") ||
+		(desc
+			? desc.querySelector(".bunny-lightbox-player__play-tsmall")
+			: playerEl.querySelector(".bunny-lightbox-player__play-tsmall"));
+	var elTitle =
+		playerEl.querySelector("[data-bunny-lightbox-meta-title]") ||
+		(desc
+			? desc.querySelector(".bunny-lightbox-player__play-t")
+			: playerEl.querySelector(".bunny-lightbox-player__play-t"));
+
+	if (elSmall) elSmall.textContent = label;
+	if (elTitle) elTitle.textContent = title;
+
+	console.log("[LB META] updateBunnyLightboxPlayMetaFromButton", {
+		labelLen: label.length,
+		titleLen: title.length,
+		labelPreview: label ? label.slice(0, 48) : "",
+		titlePreview: title ? title.slice(0, 48) : "",
+		playerIsBodyChild: !!playerEl.closest("body > [data-bunny-lightbox-status]"),
+		hasDesc: !!desc,
+		wroteSmall: !!elSmall,
+		wroteTitle: !!elTitle,
+	});
+
+	if (!label && !title) {
+		console.warn(
+			"[LB META] Leere Strings — am Open-Button fehlen vermutlich data-bunny-lightbox-label / data-bunny-lightbox-title (oder data-lightbox-label / data-lightbox-title). CMS-Felder prüfen.",
+		);
+	}
+
+	if (!desc && (!elSmall || !elTitle)) {
+		console.warn(
+			"[LB META] .bunny-lightbox-player__desc oder Ziel-Knoten nicht gefunden. Optional am Player: [data-bunny-lightbox-meta-label] / [data-bunny-lightbox-meta-title] setzen.",
+		);
+	}
+}
+
+// -----------------------------------------
+// PORTFOLIO: MASONRY + FLIP LIGHTBOX + VIDEO/STILL TOGGLE
+// (Eigenes Markup: data-lightbox="…", data-gallery — unabhängig von Bunny-Video-Lightbox data-bunny-*)
+// -----------------------------------------
+
+function queryMasonryListElements(root) {
+	var rootEl = root && root.querySelectorAll ? root : document;
+	var out = Array.from(rootEl.querySelectorAll("[data-masonry-list]"));
+	if (
+		rootEl !== document &&
+		rootEl.getAttribute &&
+		rootEl.getAttribute("data-masonry-list") !== null
+	) {
+		out.unshift(rootEl);
+	}
+	return out;
+}
+
+function createPortfolioLightbox(container, options) {
+	options = options || {};
+	var onStart = options.onStart;
+	var onOpen = options.onOpen;
+	var onClose = options.onClose;
+	var onCloseComplete = options.onCloseComplete;
+
+	var elements = {
+		wrapper: container.querySelector('[data-lightbox="wrapper"]'),
+		triggers: container.querySelectorAll('[data-lightbox="trigger"]'),
+		triggerParents: container.querySelectorAll(
+			'[data-lightbox="trigger-parent"]',
+		),
+		items: container.querySelectorAll('[data-lightbox="item"]'),
+		nav: container.querySelectorAll('[data-lightbox="nav"]'),
+		counter: {
+			current: container.querySelector('[data-lightbox="counter-current"]'),
+			total: container.querySelector('[data-lightbox="counter-total"]'),
+		},
+		buttons: {
+			prev: container.querySelector('[data-lightbox="prev"]'),
+			next: container.querySelector('[data-lightbox="next"]'),
+			close: container.querySelector('[data-lightbox="close"]'),
+		},
+	};
+
+	var mainTimeline = gsap.timeline();
+	var scrollYWhenOpened = 0;
+
+	if (elements.counter.total) {
+		elements.counter.total.textContent = String(elements.triggers.length);
+	}
+
+	function closeLightbox() {
+		if (onClose) onClose();
+
+		mainTimeline.clear();
+		gsap.killTweensOf([
+			elements.wrapper,
+			elements.nav,
+			elements.triggerParents,
+			elements.items,
+			container.querySelector('[data-lightbox="original"]'),
+		]);
+
+		container.removeEventListener("click", handleOutsideClick);
+
+		var tl = gsap.timeline({
+			defaults: { ease: "power2.inOut" },
+			onComplete: function () {
+				if (elements.wrapper) elements.wrapper.classList.remove("is-active");
+
+				elements.items.forEach(function (item) {
+					item.classList.remove("is-active");
+					var lightboxImage = item.querySelector("img");
+					if (lightboxImage) lightboxImage.style.display = "";
+				});
+
+				var originalImg = container.querySelector('[data-lightbox="original"]');
+				if (originalImg) gsap.set(originalImg, { clearProps: "all" });
+
+				var originalParent = container.querySelector(
+					'[data-lightbox="original-parent"]',
+				);
+				if (originalParent) {
+					originalParent.parentElement.style.removeProperty("height");
+				}
+
+				var masonryList = container.querySelector("[data-masonry-list]");
+				if (masonryList && masonryList._masonry)
+					masonryList._masonry.recalc();
+
+				var y = scrollYWhenOpened;
+				requestAnimationFrame(function () {
+					window.scrollTo(0, y);
+					requestAnimationFrame(function () {
+						window.scrollTo(0, y);
+					});
+				});
+
+				if (onCloseComplete) onCloseComplete();
+			},
+		});
+
+		var originalItem = container.querySelector('[data-lightbox="original"]');
+		var originalParent = container.querySelector(
+			'[data-lightbox="original-parent"]',
+		);
+
+		if (originalItem && originalParent) {
+			gsap.set(originalItem, { clearProps: "all" });
+			originalParent.appendChild(originalItem);
+			originalParent.removeAttribute("data-lightbox");
+			originalItem.removeAttribute("data-lightbox");
+		}
+
+		var activeLightboxSlide = container.querySelector(
+			'[data-lightbox="item"].is-active',
+		);
+
+		tl.to(elements.triggerParents, {
+			autoAlpha: 1,
+			duration: 0.5,
+			stagger: 0.03,
+			overwrite: true,
+		})
+			.to(
+				elements.nav,
+				{
+					autoAlpha: 0,
+					y: "1rem",
+					duration: 0.4,
+					stagger: 0,
+				},
+				"<",
+			)
+			.to(
+				elements.wrapper,
+				{
+					backgroundColor: "rgba(0,0,0,0)",
+					duration: 0.4,
+				},
+				"<",
+			)
+			.to(
+				activeLightboxSlide,
+				{
+					autoAlpha: 0,
+					duration: 0.4,
+				},
+				"<",
+			)
+			.set([elements.items, activeLightboxSlide, elements.triggerParents], {
+				clearProps: "all",
+			});
+
+		mainTimeline.add(tl);
+	}
+
+	function handleOutsideClick(event) {
+		if (event.detail === 0) return;
+		var isOutside = !event.target.closest(
+			'[data-lightbox="item"].is-active img, [data-lightbox="nav"], [data-lightbox="close"], [data-lightbox="trigger"]',
+		);
+		if (isOutside) closeLightbox();
+	}
+
+	function updateActiveItem(index) {
+		elements.items.forEach(function (item) {
+			item.classList.remove("is-active");
+		});
+		if (elements.items[index]) elements.items[index].classList.add("is-active");
+		if (elements.counter.current) {
+			elements.counter.current.textContent = String(index + 1);
+		}
+		var trig = elements.triggers[index];
+		if (trig) updateBunnyLightboxPlayMetaFromButton(trig);
+	}
+
+	ensureFlipPluginRegistered();
+	var FlipRef = typeof window !== "undefined" ? window.Flip : undefined;
+
+	elements.triggers.forEach(function (trigger, index) {
+		trigger.addEventListener("click", function () {
+			var img = trigger.querySelector("img");
+			if (!img || typeof FlipRef === "undefined" || !FlipRef) return;
+
+			if (onStart) onStart();
+
+			mainTimeline.clear();
+			gsap.killTweensOf([
+				elements.wrapper,
+				elements.nav,
+				elements.triggerParents,
+			]);
+
+			scrollYWhenOpened = window.scrollY;
+
+			var state = FlipRef.getState(img);
+
+			var triggerRect = trigger.getBoundingClientRect();
+			trigger.parentElement.style.height = triggerRect.height + "px";
+
+			trigger.setAttribute("data-lightbox", "original-parent");
+			img.setAttribute("data-lightbox", "original");
+
+			updateActiveItem(index);
+
+			container.addEventListener("click", handleOutsideClick);
+
+			var tl = gsap.timeline({
+				onComplete: function () {
+					if (onOpen) onOpen();
+				},
+			});
+
+			if (elements.wrapper) elements.wrapper.classList.add("is-active");
+			var targetItem = elements.items[index];
+
+			var lightboxImage = targetItem ? targetItem.querySelector("img") : null;
+			if (lightboxImage) lightboxImage.style.display = "none";
+
+			elements.triggerParents.forEach(function (otherTrigger) {
+				if (otherTrigger !== trigger) {
+					gsap.to(otherTrigger, {
+						autoAlpha: 0,
+						duration: 0.4,
+						stagger: 0.02,
+						overwrite: true,
+					});
+				}
+			});
+
+			if (targetItem && !targetItem.contains(img)) {
+				targetItem.appendChild(img);
+				tl.add(
+					FlipRef.from(state, {
+						targets: img,
+						absolute: true,
+						duration: 0.6,
+						ease: "power2.inOut",
+					}),
+					0,
+				);
+			}
+
+			tl.to(
+				elements.wrapper,
+				{
+					backgroundColor: "rgba(0,0,0,0.75)",
+					duration: 0.6,
+				},
+				0,
+			).fromTo(
+				elements.nav,
+				{
+					autoAlpha: 0,
+					y: "1rem",
+				},
+				{
+					autoAlpha: 1,
+					y: "0rem",
+					duration: 0.6,
+					stagger: { each: 0.05, from: "center" },
+				},
+				0.2,
+			);
+
+			mainTimeline.add(tl);
+
+			requestAnimationFrame(function () {
+				window.scrollTo(0, scrollYWhenOpened);
+			});
+		});
+	});
+
+	if (elements.buttons.next) {
+		elements.buttons.next.addEventListener("click", function () {
+			var currentIndex = Array.from(elements.items).findIndex(function (item) {
+				return item.classList.contains("is-active");
+			});
+			updateActiveItem(
+				(currentIndex + 1) % elements.items.length,
+			);
+		});
+	}
+
+	if (elements.buttons.prev) {
+		elements.buttons.prev.addEventListener("click", function () {
+			var currentIndex = Array.from(elements.items).findIndex(function (item) {
+				return item.classList.contains("is-active");
+			});
+			updateActiveItem(
+				(currentIndex - 1 + elements.items.length) % elements.items.length,
+			);
+		});
+	}
+
+	if (elements.buttons.close) {
+		elements.buttons.close.addEventListener("click", closeLightbox);
+	}
+}
+
+(function bindPortfolioImageLightboxKeysOnce() {
+	if (bindPortfolioImageLightboxKeysOnce.done) return;
+	bindPortfolioImageLightboxKeysOnce.done = true;
+	document.addEventListener("keydown", function (event) {
+		var w = document.querySelector('[data-lightbox="wrapper"].is-active');
+		if (!w) return;
+		switch (event.key) {
+			case "Escape": {
+				var c = w.querySelector('[data-lightbox="close"]');
+				if (c) c.click();
+				break;
+			}
+			case "ArrowRight": {
+				var n = w.querySelector('[data-lightbox="next"]');
+				if (n) n.click();
+				break;
+			}
+			case "ArrowLeft": {
+				var p = w.querySelector('[data-lightbox="prev"]');
+				if (p) p.click();
+				break;
+			}
+			default:
+				break;
+		}
+	});
+})();
+
+function initMasonryGrid(root) {
+	queryMasonryListElements(root).forEach(function (container) {
+		if (container.offsetParent === null) return;
+		if (container.dataset.masonryJsInit) return;
+		container.dataset.masonryJsInit = "true";
+
+		var shuffle = container.dataset.masonryShuffle !== "false";
+		var cols;
+		var gapPx;
+		var colHeights;
+
+		var getVars = function () {
+			var cs = getComputedStyle(container);
+			cols = parseInt(cs.getPropertyValue("--masonry-col"), 10);
+			var rawGap = cs.getPropertyValue("--masonry-gap").trim();
+			if (rawGap.endsWith("px")) {
+				gapPx = parseFloat(rawGap);
+			} else if (rawGap.endsWith("em")) {
+				gapPx = parseFloat(rawGap) * parseFloat(cs.fontSize);
+			} else if (rawGap.endsWith("rem")) {
+				gapPx =
+					parseFloat(rawGap) *
+					parseFloat(getComputedStyle(document.documentElement).fontSize);
+			} else {
+				gapPx = parseFloat(rawGap);
+			}
+		};
+
+		var layout = function () {
+			getVars();
+			var wCalc = "(100% - " + (cols - 1) + "*var(--masonry-gap)) / " + cols;
+			colHeights = Array(cols).fill(0);
+			container.style.position = "relative";
+			var items = Array.from(container.children);
+			items.forEach(function (el) {
+				el.style.position = "absolute";
+				el.style.width = "calc(" + wCalc + ")";
+			});
+			items.forEach(function (el, i) {
+				var h = el.offsetHeight;
+				var idx = shuffle
+					? colHeights.indexOf(Math.min.apply(null, colHeights))
+					: i % cols;
+				el.style.top = colHeights[idx] + "px";
+				el.style.left =
+					"calc(" + wCalc + "*" + idx + " + var(--masonry-gap)*" + idx + ")";
+				colHeights[idx] += h + gapPx;
+			});
+			container.style.height = Math.max.apply(null, colHeights) + "px";
+		};
+
+		var debounce = function (fn, delay) {
+			var t;
+			return function () {
+				clearTimeout(t);
+				t = setTimeout(fn, delay);
+			};
+		};
+
+		var onResize = debounce(layout, 100);
+		window.addEventListener("resize", onResize);
+
+		var debouncedLayout = debounce(layout, 50);
+		var imgLoad = function () {
+			container.querySelectorAll("img").forEach(function (img) {
+				if (!img.complete) {
+					img.addEventListener("load", debouncedLayout, { once: true });
+					img.addEventListener("error", debouncedLayout, { once: true });
+				}
+			});
+		};
+
+		layout();
+		imgLoad();
+
+		container._masonry = {
+			recalc: function () {
+				layout();
+				imgLoad();
+			},
+			destroy: function () {
+				window.removeEventListener("resize", onResize);
+				Array.from(container.children).forEach(function (el) {
+					el.style.position =
+						el.style.width =
+						el.style.top =
+						el.style.left =
+							"";
+				});
+				container.style.position = container.style.height = "";
+				delete container.dataset.masonryJsInit;
+			},
+		};
+	});
+}
+
+function initPortfolioPageFeatures(root) {
+	var scope = root && root.querySelector ? root : document;
+	if (scope.querySelector("[data-portfolio-toggle]")) {
+		initPortfolioMasonryAndToggle(scope);
+	} else {
+		initMasonryGrid(scope);
+	}
+}
+
+function initPortfolioMasonryAndToggle(scopeRoot) {
+	var scope = scopeRoot && scopeRoot.querySelector ? scopeRoot : document;
+	var wrapper = scope.querySelector("[data-portfolio-toggle]");
+	if (!wrapper || wrapper.dataset.portfolioScriptInitialized) return;
+	wrapper.dataset.portfolioScriptInitialized = "true";
+
+	var btns = wrapper.querySelectorAll("[data-portfolio-toggle-btn]");
+	var views = {
+		video:
+			wrapper.querySelector(".folio_videos") ||
+			document.querySelector(".folio_videos"),
+		still:
+			wrapper.querySelector(".folio_stills") ||
+			document.querySelector(".folio_stills"),
+	};
+
+	var initialized = {
+		video: false,
+		still: false,
+	};
+
+	function initLightboxesIn(view) {
+		if (!view) return;
+		var galleries = view.matches("[data-gallery]")
+			? [view]
+			: Array.from(view.querySelectorAll("[data-gallery]"));
+		galleries.forEach(function (gallery) {
+			if (!gallery.dataset.lightboxInitialized) {
+				gallery.dataset.lightboxInitialized = "true";
+				createPortfolioLightbox(gallery);
+			}
+		});
+	}
+
+	function activateView(viewKey) {
+		btns.forEach(function (b) {
+			b.classList.remove("is-active");
+		});
+		var activeBtn = scope.querySelector(
+			'[data-portfolio-toggle-btn][data-view="' + viewKey + '"]',
+		);
+		if (activeBtn) activeBtn.classList.add("is-active");
+
+		Object.keys(views).forEach(function (k) {
+			var el = views[k];
+			if (el) el.classList.remove("is-active");
+		});
+		var activeView = views[viewKey];
+		if (activeView) activeView.classList.add("is-active");
+
+		var masonryList = activeView
+			? activeView.querySelector("[data-masonry-list]")
+			: null;
+		if (masonryList && masonryList._masonry) {
+			masonryList._masonry.recalc();
+		} else {
+			initMasonryGrid(activeView || scope);
+		}
+
+		if (activeView && activeView.querySelector("[data-media-init]")) {
+			requestAnimationFrame(() => {
+				initMediaSetup();
+			});
+		}
+
+		if (!initialized[viewKey]) {
+			initialized[viewKey] = true;
+			initLightboxesIn(activeView);
+		}
+	}
+
+	btns.forEach(function (btn) {
+		btn.addEventListener("click", function () {
+			var v = btn.getAttribute("data-view");
+			if (v) activateView(v);
+		});
+	});
+
+	var defaultBtn = wrapper.querySelector("[data-portfolio-toggle-btn].is-active");
+	var defaultView = defaultBtn && defaultBtn.getAttribute("data-view");
+	activateView(defaultView || "video");
+}
+
 // -----------------------------------------
 // BUNNY LIGHTBOX PLAYER
 // -----------------------------------------
@@ -4679,7 +5356,7 @@ function initBunnyLightboxPlayer() {
 		}
 	}
 
-	function openLightbox(src, placeholderUrl) {
+	function openLightbox(src, placeholderUrl, metaFromBtn) {
 		console.log("[LB DEBUG] openLightbox called", {
 			src,
 			placeholderUrl,
@@ -4690,6 +5367,8 @@ function initBunnyLightboxPlayer() {
 		function activate() {
 			console.log("[LB DEBUG] activate() called, about to ensureOpenUI(true)");
 			ensureOpenUI(true);
+			// Nach sichtbarem UI: Textziele sitzen unter .bunny-lightbox-player__desc im Player
+			if (metaFromBtn) updateBunnyLightboxPlayMetaFromButton(metaFromBtn, player);
 			planOnOpen(src);
 		}
 
@@ -5068,7 +5747,7 @@ function initBunnyLightboxPlayer() {
 					var container = document.querySelector('[data-barba="container"]');
 					if (!container || container.style.position !== "fixed") {
 						clearInterval(checkInterval);
-						openLightbox(src, placeholderUrl);
+						openLightbox(src, placeholderUrl, openBtn);
 					}
 				}, 100);
 
@@ -5086,7 +5765,7 @@ function initBunnyLightboxPlayer() {
 			var imgEl = openBtn.querySelector("[data-bunny-lightbox-placeholder]");
 			var placeholderUrl = imgEl ? imgEl.getAttribute("src") : "";
 			console.log("[LB DEBUG] calling openLightbox", src, placeholderUrl);
-			openLightbox(src, placeholderUrl);
+			openLightbox(src, placeholderUrl, openBtn);
 			return;
 		}
 
