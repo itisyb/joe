@@ -4201,6 +4201,7 @@ function initTypoScrollPreview() {
 							el === item ? "active" : "",
 						);
 					});
+					syncTypoScrollPreviewPlayback(container);
 				},
 				true,
 			);
@@ -4229,6 +4230,55 @@ function initTypoScrollPreview() {
 	typoScrollUpdateActive();
 }
 
+function syncTypoScrollPreviewPlayback(scope) {
+	var root = scope && scope.querySelectorAll ? scope : document;
+	var containers = [];
+	if (
+		root &&
+		root.nodeType === 1 &&
+		root.matches &&
+		root.matches("[data-typo-scroll-init]")
+	) {
+		containers.push(root);
+	}
+	Array.prototype.forEach.call(
+		root.querySelectorAll("[data-typo-scroll-init]"),
+		(container) => {
+			containers.push(container);
+		},
+	);
+
+	containers.forEach((container) => {
+		var items = container.querySelectorAll("[data-typo-scroll-item]");
+		items.forEach((item) => {
+			var video = item.querySelector("video");
+			if (!video) return;
+
+			var isActive = item.getAttribute("data-typo-scroll-item") === "active";
+			video.muted = true;
+			video.defaultMuted = true;
+			video.playsInline = true;
+			video.setAttribute("muted", "");
+			video.setAttribute("playsinline", "");
+			video.setAttribute("webkit-playsinline", "");
+
+			if (isActive) {
+				if (video.paused) {
+					video.play().catch(() => {});
+				}
+				return;
+			}
+
+			if (!video.paused) {
+				video.pause();
+			}
+			if (video.currentTime !== 0) {
+				video.currentTime = 0;
+			}
+		});
+	});
+}
+
 function typoScrollUpdateActive() {
 	var viewportCenterY = window.innerHeight / 2;
 	var liveContainers = document.querySelectorAll("[data-typo-scroll-init]");
@@ -4245,6 +4295,7 @@ function typoScrollUpdateActive() {
 			items.forEach((item) => {
 				item.setAttribute("data-typo-scroll-item", "");
 			});
+			syncTypoScrollPreviewPlayback(container);
 			return;
 		}
 
@@ -4266,6 +4317,7 @@ function typoScrollUpdateActive() {
 			items.forEach((item) => {
 				item.setAttribute("data-typo-scroll-item", "");
 			});
+			syncTypoScrollPreviewPlayback(container);
 			return;
 		}
 
@@ -4275,6 +4327,7 @@ function typoScrollUpdateActive() {
 				item === closestItem ? "active" : "",
 			);
 		});
+		syncTypoScrollPreviewPlayback(container);
 	});
 }
 
