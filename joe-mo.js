@@ -1,4 +1,4 @@
-// Version: 2026-04-08.202850
+// Version: 2026-04-08.204336
 // -----------------------------------------
 // OSMO PAGE TRANSITION BOILERPLATE
 // -----------------------------------------
@@ -1331,7 +1331,7 @@ function runPageOnceAnimation(next) {
 	const tl = gsap.timeline();
 	tl.call(
 		() => {
-			resetPage(next);
+			resetPage(next, { resetScroll: false });
 		},
 		null,
 		0,
@@ -2261,8 +2261,11 @@ function initLenis() {
 	gsap.ticker.lagSmoothing(0);
 }
 
-function resetPage(container) {
-	window.scrollTo(0, 0);
+function resetPage(container, options) {
+	var shouldResetScroll = !options || options.resetScroll !== false;
+	if (shouldResetScroll) {
+		window.scrollTo(0, 0);
+	}
 	resetLiveNavMenuClosedState();
 	gsap.set(container, {
 		clearProps: "position,top,left,right,transform,opacity,visibility,pointerEvents",
