@@ -1,4 +1,4 @@
-// Version: 2026-04-08
+// Version: 2026-04-08.202850
 // -----------------------------------------
 // OSMO PAGE TRANSITION BOILERPLATE
 // -----------------------------------------
@@ -921,6 +921,16 @@ function getHeroPreloadNav(container) {
 	return document.querySelector("#main-nav") || document.querySelector("nav.navjn_wrap");
 }
 
+function playVideoSafely(video) {
+	if (!video || typeof video.play !== "function") return;
+	try {
+		var playPromise = video.play();
+		if (playPromise && typeof playPromise.catch === "function") {
+			playPromise.catch(() => {});
+		}
+	} catch (_) {}
+}
+
 // After the first visit, runHeroPreloader only runs in barba `once`; incoming Home HTML
 // still has the black cover visible — hide it and match the post-preload hero state.
 function resetHeroPreloadForRepeatBarbaVisit(container) {
@@ -978,11 +988,7 @@ function resetHeroPreloadForRepeatBarbaVisit(container) {
 	if (revealEls.length)
 		gsap.set(revealEls, { autoAlpha: 1, y: 0, yPercent: 0 });
 
-	if (video) {
-		try {
-			video.play();
-		} catch (_) {}
-	}
+	playVideoSafely(video);
 }
 
 function runHeroPreloader(container) {
@@ -1051,11 +1057,7 @@ function runHeroPreloader(container) {
 					}
 					gsap.set(cover, { autoAlpha: 0, pointerEvents: "none" });
 					_heroPreloadCompleted = true;
-					if (video) {
-						try {
-							video.play();
-						} catch (_) {}
-					}
+					playVideoSafely(video);
 					resolve();
 				}
 
