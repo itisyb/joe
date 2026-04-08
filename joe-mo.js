@@ -1,4 +1,4 @@
-// Version: 2026-04-08.204336
+// Version: 2026-04-08.212517
 // -----------------------------------------
 // OSMO PAGE TRANSITION BOILERPLATE
 // -----------------------------------------
@@ -2242,7 +2242,9 @@ function initLenis() {
 		lenis.on("scroll", ScrollTrigger.update);
 		ScrollTrigger.scrollerProxy(document.body, {
 			scrollTop: function (value) {
-				if (arguments.length) lenis.scrollTo(value);
+				if (arguments.length) {
+					lenis.scrollTo(value, { immediate: true });
+				}
 				return lenis.scrollTop != null ? lenis.scrollTop : lenis.scroll;
 			},
 			getBoundingClientRect: () => ({
