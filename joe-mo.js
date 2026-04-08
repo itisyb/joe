@@ -68,6 +68,23 @@
 	else document.addEventListener("DOMContentLoaded", inject);
 })();
 
+(function injectTypoScrollHoverResetStyleOnce() {
+	if (typeof document === "undefined") return;
+	function inject() {
+		if (document.getElementById("jjn-typo-scroll-hover-reset")) return;
+		var st = document.createElement("style");
+		st.id = "jjn-typo-scroll-hover-reset";
+		st.textContent =
+			'html[data-typo-scroll-hover-reset="true"] [data-typo-scroll-item]:not([data-typo-scroll-item="active"]):hover .typo-scroll__h{z-index:inherit!important;color:inherit!important;mix-blend-mode:normal!important}' +
+			'html[data-typo-scroll-hover-reset="true"] [data-typo-scroll-item]:not([data-typo-scroll-item="active"]):hover .typo-scroll__media{opacity:0!important;pointer-events:none!important;clip-path:polygon(calc(0% + var(--po, 1.5em)) calc(0% + var(--po, 1.5em)),calc(100% - var(--po, 1.5em)) calc(0% + var(--po, 1.5em)),calc(100% - var(--po, 1.5em)) calc(100% - var(--po, 1.5em)),calc(0% + var(--po, 1.5em)) calc(100% - var(--po, 1.5em)))!important}';
+		var h = document.head || document.getElementsByTagName("head")[0];
+		if (h) h.appendChild(st);
+		else document.documentElement.appendChild(st);
+	}
+	if (document.head || document.getElementsByTagName("head")[0]) inject();
+	else document.addEventListener("DOMContentLoaded", inject);
+})();
+
 // Incoming Barba pages: hide load-animation targets until their JS init has prepared
 // the pre-animation state, so the revealed page doesn't show a static snapshot first.
 (function injectBarbaEnterPendingStyleOnce() {
@@ -4161,6 +4178,17 @@ function initTypoScrollPreview() {
 		navigator.maxTouchPoints > 0 ||
 		navigator.msMaxTouchPoints > 0;
 
+	if (!window._typoScrollMouseMoveResetAdded) {
+		window._typoScrollMouseMoveResetAdded = true;
+		window.addEventListener(
+			"mousemove",
+			() => {
+				setTypoScrollHoverResetState(false);
+			},
+			{ passive: true },
+		);
+	}
+
 	if (!window._typoScrollScrollAdded) {
 		window._typoScrollScrollAdded = true;
 
@@ -4168,7 +4196,13 @@ function initTypoScrollPreview() {
 		function onTypoScroll() {
 			if (!ticking) {
 				requestAnimationFrame(() => {
-					if (!window._typoScrollHoverLock) typoScrollUpdateActive();
+					if (!isTouchDevice) {
+						setTypoScrollHoverResetState(true);
+					}
+					if (window._typoScrollHoverLock) {
+						window._typoScrollHoverLock = false;
+					}
+					typoScrollUpdateActive();
 					ticking = false;
 				});
 				ticking = true;
@@ -4193,6 +4227,7 @@ function initTypoScrollPreview() {
 					var from = e.relatedTarget;
 					if (from && item.contains(from)) return;
 
+					setTypoScrollHoverResetState(false);
 					window._typoScrollHoverLock = true;
 					var items = container.querySelectorAll("[data-typo-scroll-item]");
 					items.forEach((el) => {
@@ -4228,6 +4263,15 @@ function initTypoScrollPreview() {
 	}
 
 	typoScrollUpdateActive();
+}
+
+function setTypoScrollHoverResetState(shouldReset) {
+	if (typeof document === "undefined" || !document.documentElement) return;
+	if (shouldReset) {
+		document.documentElement.setAttribute("data-typo-scroll-hover-reset", "true");
+		return;
+	}
+	document.documentElement.removeAttribute("data-typo-scroll-hover-reset");
 }
 
 function syncTypoScrollPreviewPlayback(scope) {
