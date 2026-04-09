@@ -1,4 +1,4 @@
-// Version: 2026-04-09.152847
+// Version: 2026-04-09.162958
 // -----------------------------------------
 // OSMO PAGE TRANSITION BOILERPLATE
 // -----------------------------------------
@@ -951,6 +951,13 @@ function playVideoSafely(video, onPlay) {
 		if (playPromise && typeof playPromise.catch === "function") {
 			playPromise.catch(() => {});
 		}
+	} catch (_) {}
+}
+
+function loadVideoElementSafely(video) {
+	if (!video || typeof video.load !== "function") return;
+	try {
+		video.load();
 	} catch (_) {}
 }
 
@@ -1979,6 +1986,9 @@ function initMediaSetup() {
 			isInView = nextInView;
 
 			if (isInView) {
+				if (!hasLoaded && (activeMode === "autoplay" || activeMode === "hover")) {
+					loadVideo();
+				}
 				activateMedia();
 				if (shouldResume()) playVideo();
 				return;
@@ -4360,6 +4370,10 @@ function bindTypoScrollMediaReadyState(scope) {
 		}
 
 		video.preload = "auto";
+		if (video.dataset.typoScrollLoadPrimed !== "true") {
+			video.dataset.typoScrollLoadPrimed = "true";
+			loadVideoElementSafely(video);
+		}
 
 		function refreshReadyState() {
 			setTypoScrollMediaReadyState(
@@ -4426,6 +4440,7 @@ function syncTypoScrollPreviewPlayback(scope) {
 			video.setAttribute("webkit-playsinline", "");
 
 			if (isActive) {
+				loadVideoElementSafely(video);
 				if (video.paused) {
 					playVideoSafely(video);
 				}
