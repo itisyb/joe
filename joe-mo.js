@@ -1,4 +1,4 @@
-// Version: 2026-04-08.212517
+// Version: 2026-04-09.152847
 // -----------------------------------------
 // OSMO PAGE TRANSITION BOILERPLATE
 // -----------------------------------------
@@ -77,6 +77,22 @@
 		st.textContent =
 			'html[data-typo-scroll-hover-reset="true"] [data-typo-scroll-item]:not([data-typo-scroll-item="active"]):hover .typo-scroll__h{z-index:inherit!important;color:inherit!important;mix-blend-mode:normal!important}' +
 			'html[data-typo-scroll-hover-reset="true"] [data-typo-scroll-item]:not([data-typo-scroll-item="active"]):hover .typo-scroll__media{opacity:0!important;pointer-events:none!important;clip-path:polygon(calc(0% + var(--po, 1.5em)) calc(0% + var(--po, 1.5em)),calc(100% - var(--po, 1.5em)) calc(0% + var(--po, 1.5em)),calc(100% - var(--po, 1.5em)) calc(100% - var(--po, 1.5em)),calc(0% + var(--po, 1.5em)) calc(100% - var(--po, 1.5em)))!important}';
+		var h = document.head || document.getElementsByTagName("head")[0];
+		if (h) h.appendChild(st);
+		else document.documentElement.appendChild(st);
+	}
+	if (document.head || document.getElementsByTagName("head")[0]) inject();
+	else document.addEventListener("DOMContentLoaded", inject);
+})();
+
+(function injectTypoScrollMediaReadyStyleOnce() {
+	if (typeof document === "undefined") return;
+	function inject() {
+		if (document.getElementById("jjn-typo-scroll-media-ready")) return;
+		var st = document.createElement("style");
+		st.id = "jjn-typo-scroll-media-ready";
+		st.textContent =
+			'[data-typo-scroll-item]:not([data-typo-scroll-media-ready="true"]) .typo-scroll__media{opacity:0!important;pointer-events:none!important;clip-path:polygon(calc(0% + var(--po, 1.5em)) calc(0% + var(--po, 1.5em)),calc(100% - var(--po, 1.5em)) calc(0% + var(--po, 1.5em)),calc(100% - var(--po, 1.5em)) calc(100% - var(--po, 1.5em)),calc(0% + var(--po, 1.5em)) calc(100% - var(--po, 1.5em)))!important}';
 		var h = document.head || document.getElementsByTagName("head")[0];
 		if (h) h.appendChild(st);
 		else document.documentElement.appendChild(st);
@@ -921,10 +937,17 @@ function getHeroPreloadNav(container) {
 	return document.querySelector("#main-nav") || document.querySelector("nav.navjn_wrap");
 }
 
-function playVideoSafely(video) {
+function playVideoSafely(video, onPlay) {
 	if (!video || typeof video.play !== "function") return;
 	try {
 		var playPromise = video.play();
+		if (!playPromise || typeof playPromise.then !== "function") {
+			if (typeof onPlay === "function") onPlay();
+			return;
+		}
+		playPromise.then(function () {
+			if (typeof onPlay === "function") onPlay();
+		});
 		if (playPromise && typeof playPromise.catch === "function") {
 			playPromise.catch(() => {});
 		}
@@ -1787,6 +1810,8 @@ function initMediaSetup() {
 
 	const pauseDelay = 200;
 	const viewportOffset = 0.1;
+	const supportsIntersectionObserver =
+		typeof window.IntersectionObserver === "function";
 	const isHoverDevice = window.matchMedia(
 		"(hover: hover) and (pointer: fine)",
 	).matches;
@@ -1846,12 +1871,9 @@ function initMediaSetup() {
 		};
 
 		const playAttempt = () => {
-			video
-				.play()
-				.then(() => {
-					if (shouldBePlaying) setStatus("playing");
-				})
-				.catch(() => {});
+			playVideoSafely(video, () => {
+				if (shouldBePlaying) setStatus("playing");
+			});
 		};
 
 		const loadVideo = () => {
@@ -1861,7 +1883,9 @@ function initMediaSetup() {
 			if (!src) return;
 
 			video.muted = true;
+			video.defaultMuted = true;
 			video.playsInline = true;
+			video.preload = "auto";
 			video.setAttribute("muted", "");
 			video.setAttribute("playsinline", "");
 			video.setAttribute("webkit-playsinline", "");
@@ -1937,38 +1961,48 @@ function initMediaSetup() {
 			}
 		};
 
+		const activateMedia = () => {
+			if (isActivated) return;
+			isActivated = true;
+
+			if (shouldUseClickToggle) {
+				clickTargets.forEach((toggleEl) => on(toggleEl, "click", handleClick));
+			}
+
+			if (activeMode === "hover") {
+				on(mediaEl, "mouseenter", handleHoverIn);
+				on(mediaEl, "mouseleave", handleHoverOut);
+			}
+		};
+
+		const applyInViewState = (nextInView) => {
+			isInView = nextInView;
+
+			if (isInView) {
+				activateMedia();
+				if (shouldResume()) playVideo();
+				return;
+			}
+
+			isHovering = false;
+			if (!video.paused || shouldBePlaying) {
+				setStatus("paused");
+				pauseVideo(0, false);
+			}
+		};
+
 		const handleViewport = (entries) => {
 			entries.forEach((entry) => {
 				if (entry.target !== mediaEl) return;
-
-				if (!isActivated && entry.isIntersecting) {
-					isActivated = true;
-
-					if (shouldUseClickToggle) {
-						clickTargets.forEach((toggleEl) =>
-							on(toggleEl, "click", handleClick),
-						);
-					}
-
-					if (activeMode === "hover") {
-						on(mediaEl, "mouseenter", handleHoverIn);
-						on(mediaEl, "mouseleave", handleHoverOut);
-					}
-				}
-
-				isInView = entry.isIntersecting;
-
-				if (isInView) {
-					if (shouldResume()) playVideo();
-				} else {
-					isHovering = false;
-
-					if (!video.paused || shouldBePlaying) {
-						setStatus("paused");
-						pauseVideo(0, false);
-					}
-				}
+				applyInViewState(entry.isIntersecting);
 			});
+		};
+
+		const syncViewportFallback = () => {
+			const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+			const padding = viewportHeight * viewportOffset;
+			const rect = mediaEl.getBoundingClientRect();
+			applyInViewState(rect.bottom >= -padding && rect.top <= viewportHeight + padding);
 		};
 
 		const handlePageVisibilityChange = () => {
@@ -1984,12 +2018,21 @@ function initMediaSetup() {
 
 		mediaEl.dataset.mediaStatus = "not-active";
 
-		const observer = new IntersectionObserver(handleViewport, {
-			rootMargin: `${rootMarginValue}% 0px ${rootMarginValue}% 0px`,
-			threshold: 0,
-		});
+		if (supportsIntersectionObserver) {
+			const observer = new IntersectionObserver(handleViewport, {
+				rootMargin: `${rootMarginValue}% 0px ${rootMarginValue}% 0px`,
+				threshold: 0,
+			});
 
-		observer.observe(mediaEl);
+			observer.observe(mediaEl);
+			addCleanup(() => observer.disconnect());
+		} else {
+			activateMedia();
+			on(window, "scroll", syncViewportFallback);
+			on(window, "resize", syncViewportFallback);
+			on(window, "orientationchange", syncViewportFallback);
+			syncViewportFallback();
+		}
 
 		on(video, "playing", () => {
 			if (shouldBePlaying) setStatus("playing");
@@ -2011,7 +2054,6 @@ function initMediaSetup() {
 
 		on(document, "visibilitychange", handlePageVisibilityChange);
 
-		addCleanup(() => observer.disconnect());
 		addCleanup(() => {
 			clearPauseTimer();
 			shouldBePlaying = false;
@@ -4185,6 +4227,8 @@ function initTypoScrollPreview() {
 		navigator.maxTouchPoints > 0 ||
 		navigator.msMaxTouchPoints > 0;
 
+	bindTypoScrollMediaReadyState(scope);
+
 	if (!window._typoScrollMouseMoveResetAdded) {
 		window._typoScrollMouseMoveResetAdded = true;
 		window.addEventListener(
@@ -4281,7 +4325,75 @@ function setTypoScrollHoverResetState(shouldReset) {
 	document.documentElement.removeAttribute("data-typo-scroll-hover-reset");
 }
 
+function setTypoScrollMediaReadyState(item, isReady) {
+	if (!item || !item.setAttribute) return;
+	if (isReady) {
+		item.setAttribute("data-typo-scroll-media-ready", "true");
+		return;
+	}
+	item.removeAttribute("data-typo-scroll-media-ready");
+}
+
+function bindTypoScrollMediaReadyState(scope) {
+	var root = scope && scope.querySelectorAll ? scope : document;
+	var items = [];
+	if (
+		root &&
+		root.nodeType === 1 &&
+		root.matches &&
+		root.matches("[data-typo-scroll-item]")
+	) {
+		items.push(root);
+	}
+	Array.prototype.forEach.call(
+		root.querySelectorAll("[data-typo-scroll-item]"),
+		(item) => {
+			items.push(item);
+		},
+	);
+
+	items.forEach((item) => {
+		var video = item.querySelector("video");
+		if (!video) {
+			setTypoScrollMediaReadyState(item, true);
+			return;
+		}
+
+		video.preload = "auto";
+
+		function refreshReadyState() {
+			setTypoScrollMediaReadyState(
+				item,
+				video.readyState >= 2 || video.currentTime > 0 || !video.paused,
+			);
+		}
+
+		if (video.dataset.typoScrollReadyBound !== "true") {
+			video.dataset.typoScrollReadyBound = "true";
+			[
+				"loadstart",
+				"loadedmetadata",
+				"loadeddata",
+				"canplay",
+				"canplaythrough",
+				"playing",
+				"waiting",
+				"stalled",
+				"suspend",
+				"emptied",
+				"pause",
+				"error",
+			].forEach((eventName) => {
+				video.addEventListener(eventName, refreshReadyState);
+			});
+		}
+
+		refreshReadyState();
+	});
+}
+
 function syncTypoScrollPreviewPlayback(scope) {
+	bindTypoScrollMediaReadyState(scope);
 	var root = scope && scope.querySelectorAll ? scope : document;
 	var containers = [];
 	if (
@@ -4315,7 +4427,7 @@ function syncTypoScrollPreviewPlayback(scope) {
 
 			if (isActive) {
 				if (video.paused) {
-					video.play().catch(() => {});
+					playVideoSafely(video);
 				}
 				return;
 			}
